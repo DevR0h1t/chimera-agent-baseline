@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tools
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.hydra/
+*.log
+
+# Project
+outputs/
+logs/
+/data/
+*.sqsh
+
+# Internal docs (not published)
+docs/internal/
+
+# Generated resources (make process-guidelines)
+resources/embedding_model/
+
+# Grand Challenge
+test/output/*
+!test/output/.gitkeep
+model/*
+!model/.gitkeep
+*.tar.gz
+
+# Environment
+.env
+
+# Notebooks
+notebooks/.ipynb_checkpoints/
+
+# OS
+.DS_Store
+docs/internal/

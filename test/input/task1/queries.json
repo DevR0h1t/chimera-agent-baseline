@@ -1,0 +1,62 @@
+[
+    {
+        "case_id": "rumc-001",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "72-year-old male referred for elevated PSA. No prior biopsies. Family history: father diagnosed with prostate cancer at age 68. Patient recently retired from civil engineering. Non-smoker. Scheduled for cataract surgery next month. Allergic to shellfish."
+    },
+    {
+        "case_id": "rumc-002",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "70-year-old male with rising PSA over 2 years. No urinary symptoms. No family history of prostate cancer. Enjoys gardening and swimming three times per week. Takes atorvastatin for mild hypercholesterolemia. Had appendectomy at age 24."
+    },
+    {
+        "case_id": "rumc-003",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "74-year-old male with LUTS and elevated PSA. History of benign prostatic hyperplasia. Brother had prostate cancer. Patient lives alone, is a former teacher. Takes tamsulosin for BPH symptoms. Recent knee replacement surgery 6 months ago. Moderate alcohol intake."
+    },
+    {
+        "case_id": "rumc-004",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "60-year-old male referred after abnormal DRE. PSA rising over 18 months. No prior prostate procedures. Works as a logistics manager, physically active. Bilateral hearing loss requiring hearing aids. Takes omeprazole for GERD."
+    },
+    {
+        "case_id": "rumc-005",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "63-year-old male with elevated PSA detected during routine screening. Asymptomatic. No family history. Patient recently moved from another province. History of tennis elbow treated conservatively. Takes vitamin D supplements."
+    },
+    {
+        "case_id": "ks-001",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "72-year-old male. Hypertension, metformin. Father had prostate cancer. Patient is a retired bus driver. Wears glasses for reading. Mild osteoarthritis in both hips. Wife recently diagnosed with breast cancer (not relevant to this case)."
+    },
+    {
+        "case_id": "ks-002",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "72-year-old male. Hypertension, metformin. Father had prostate cancer. Patient has two adult children. Takes aspirin 81mg daily. Had a flu vaccination last week. Scheduled for dental cleaning next month."
+    },
+    {
+        "case_id": "ks-003",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "59-year-old male. Hypertension, metformin. Father had prostate cancer. Patient is a software developer, works from home. Runs 5K three times weekly. Lactose intolerant. Had travel vaccination for hepatitis A last year."
+    },
+    {
+        "case_id": "ks-004",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "64-year-old male. Hypertension, metformin. Previous lesion on prior MRI. Patient recently adopted a rescue dog. Takes sertraline for mild anxiety. Former smoker, quit 15 years ago. Brother had colon cancer at age 71."
+    },
+    {
+        "case_id": "ks-005",
+        "task": "mri_diagnostic",
+        "query": "Estimate the probability of clinically significant prostate cancer and recommend whether biopsy is warranted.",
+        "context": "76-year-old male. No comorbidities. Previous lesion on prior MRI. BPH symptoms for 5 years. Patient collects antique clocks. Seasonal allergies managed with cetirizine. Has three grandchildren. Wears a pacemaker for bradycardia."
+    }
+]

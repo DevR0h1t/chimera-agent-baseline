@@ -1,0 +1,56 @@
+# =============================================================================
+# Chimera Agent Baseline — Default configuration
+#
+# All parameters live here, not in code.
+# Override per-experiment with +experiment=name or bare key=value on the CLI.
+#
+# Usage:
+#   make run                                                 # uses this file
+#   make run RUN_ARGS="model.model_id=meta-llama/..."        # CLI override
+#   make run RUN_ARGS="+experiment=my_experiment"             # experiment overlay
+#   make run RUN_ARGS="paths.input_dir=test/input/task2"     # different task
+# =============================================================================
+
+defaults:
+  - _self_
+
+# --- Paths ---
+# Local defaults mirror the Grand Challenge filesystem layout.
+# In the GC container these are overridden to /input, /output, etc.
+paths:
+  input_dir: test/input/task1
+  output_dir: test/output
+  resource_dir: resources
+  model_dir: model
+
+# --- Model ---
+# In-process inference via vLLM. Model loaded from paths.model_dir
+# (if non-empty) or downloaded from HuggingFace Hub via model_id.
+model:
+  model_id: google/gemma-4-E2B-it
+  # Tool call parser — must match your model's function-calling format.
+  # Common values: gemma4, hermes, llama, mistral, pythonic
+  tool_parser: gemma4
+
+# --- Agent ---
+agent:
+  max_iterations: 25             # max ReAct loop steps before stopping
+  step_timeout: 120              # seconds per graph step
+
+# --- Logging ---
+logging:
+  level: INFO                    # DEBUG, INFO, WARNING, ERROR
+
+# --- Generation ---
+generation:
+  temperature: 1.0
+  max_new_tokens: 4096
+  max_model_len: 32768           # vLLM context window (Gemma 4 supports up to 128K)
+  top_p: 0.95
+
+# --- Hydra settings ---
+hydra:
+  run:
+    dir: .
+  job:
+    chdir: false

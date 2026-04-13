@@ -1,0 +1,10 @@
+[
+    {
+        "interface": {
+            "slug": "clinical-data",
+            "kind": "JSON",
+            "super_kind": "Value",
+            "relative_path": "clinical-data.json"
+        }
+    }
+]
