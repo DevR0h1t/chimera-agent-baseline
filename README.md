@@ -4,85 +4,86 @@
 
 # Chimera Agent Baseline
 
-Baseline agent for the [CHIMERA-Agent challenge](https://chimera-agent.grand-challenge.org/chimera-agent/).
-Uses a ReAct reasoning loop with clinical tools served via MCP and
-guideline retrieval via RAG.
+Baseline agent for the
+[CHIMERA-Agent challenge](https://chimera-agent.grand-challenge.org/chimera-agent/).
+A LangGraph ReAct loop calls clinical tools served via MCP, retrieves
+guidelines via RAG, and emits a structured per-case decision through a
+terminal form-fill node.
 
 ## Quick start
 
 ```bash
 uv venv && source .venv/bin/activate
-cp .env.example .env                    # add your HF_TOKEN
+cp .env.example .env                    # add HF_TOKEN
 make install
 make test
 ```
 
-Download model weights and embedding model (requires accepted licenses on
+Download the LLM and embedding model (requires accepted licenses on
 [Gemma 4](https://huggingface.co/google/gemma-4-E2B-it) and
 [embeddinggemma](https://huggingface.co/google/embeddinggemma-300m)):
 
 ```bash
-# LLM (~10GB)
 python -c "from huggingface_hub import snapshot_download; snapshot_download('google/gemma-4-E2B-it', local_dir='model/')"
-
-# Embedding model for guidelines search (~1.2GB, saved to resources/)
-make process-guidelines
+make process-guidelines    # builds resources/guidelines_db (~1.2 GB)
 ```
 
-Run the agent (requires NVIDIA GPU with ≥16GB VRAM):
+Run the agent (NVIDIA GPU with ≥16 GB VRAM):
 
 ```bash
-make run
+make run                                                     # task 1
+make run RUN_ARGS="agent.tool_registry=task2 \
+    paths.input_dir=outputs/agent_input/task2"               # task 2
+make run RUN_ARGS="agent.limit=5"                            # 5 cases
 ```
 
-Output is written to `test/output/predictions.json`.
+Per-case predictions land in `test/output/predictions/task<N>/<pid>.json`;
+the aggregate is `test/output/predictions.json`.
 
-## Local testing layout
-
-The repo mirrors the Grand Challenge filesystem so the same code works
-locally and in the container:
+## Layout
 
 | Local path | Container path | Contents |
-|------------|---------------|----------|
-| `test/input/task{1,2,3}/` | `/input` | Queries + clinical data (read-only) |
-| `test/output/` | `/output` | Agent predictions (written by the agent) |
+|---|---|---|
+| `outputs/agent_input/task{1,2}/<pid>/{prompt,tools}.json` | `/input` | Per-case agent inputs |
+| `test/output/` | `/output` | Predictions written by the agent |
 | `model/` | `/opt/ml/model` | LLM weights (gitignored) |
 | `resources/` | `/opt/app/resources` | Config, guidelines DB, embedding model |
 
-To test a specific task:
+The participant ships `prompt.json`; `tools.json` is read only by the MCP
+server and reaches the agent through tool calls.
 
-```bash
-make run RUN_ARGS="paths.input_dir=test/input/task2"
-```
-
-To test in a Docker container (mirrors Grand Challenge runtime):
+To test in the GC Docker container:
 
 ```bash
 make gc-build
-make gc-test                                    # task 1 (default)
-make gc-test GC_INPUT_DIR=test/input/task3      # task 3
+make gc-test                                                  # task 1
+make gc-test GC_INPUT_DIR=outputs/agent_input/task2           # task 2
 ```
-
-On Grand Challenge, `/input` and `/output` are mounted by the platform.
-Model weights are uploaded separately and mounted at `/opt/ml/model`.
-No changes to the MCP server or agent code are needed.
 
 ## Documentation
 
 | Document | What it covers |
-|----------|---------------|
-| [User Manual](docs/user-manual.md) | Requirements, setup, commands, troubleshooting |
-| [Architecture](docs/architecture.md) | Components, how to add tools / skills / knowledge |
-| [Model Configuration](docs/models.md) | Swapping models, tool parsers, experiment overlays |
-| [Challenge Tasks](docs/chimera.md) | Task definitions, inputs, outputs, metrics |
+|---|---|
+| [User Manual](docs/user-manual.md) | Setup, commands, troubleshooting |
+| [Architecture](docs/architecture.md) | Components, ReAct + form-fill graph |
+| [Model Configuration](docs/models.md) | Swapping models, providers, experiment overlays |
+| [Challenge Tasks](docs/chimera.md) | Task definitions, inputs, outputs |
 
 ## What to change
 
 | Goal | Where |
-|------|-------|
+|---|---|
 | Change the system prompt | `src/chimera_agent_baseline/agent/prompts.py` |
-| Add a clinical tool | `src/chimera_agent_baseline/tools/definitions.py` |
-| Add an Agent Skill | `skills/<name>/SKILL.md` |
-| Swap the LLM | `configs/config.yaml` → `model.model_id` + `model.tool_parser` |
+| Edit the case prompt template | `templates/prompts/agent_prompt.j2` |
+| Add a clinical tool | `src/chimera_agent_baseline/tools/definitions.py` (`TASK1_TOOLS` / `TASK2_TOOLS`) |
+| Swap the LLM (vLLM) | `configs/config.yaml` → `model.model_id`, `model.tool_parser` |
+| Swap the LLM (OpenAI-compatible) | `configs/experiment/qwen_local.yaml` (`+experiment=qwen_local`) |
 | Change the agent loop | `src/chimera_agent_baseline/agent/graph.py` |
-| Add knowledge to RAG | `scripts/process_guidelines.py` → rebuild with your PDF |
+| Tune the form-fill prompt / retry | `src/chimera_agent_baseline/agent/form_fill.py` |
+| Rebuild the RAG corpus | `scripts/process_guidelines.py` |
+
+The structured submission contract lives in
+`src/chimera_agent_baseline/output/schema.py`. Submissions whose final
+output does not validate against `Task1Output` / `Task2Output` are
+rejected. Swap models, tools, prompts, and orchestration freely — keep
+the shape.

@@ -1,201 +1,138 @@
 # User Manual
 
-## System requirements
+## Requirements
 
 | Requirement | Why |
-|-------------|-----|
+|---|---|
 | Python 3.12+ | Language runtime |
-| [uv](https://docs.astral.sh/uv/) | Package manager (`pip install uv` or `curl -LsSf https://astral.sh/uv/install.sh \| sh`) |
-| NVIDIA GPU ≥16GB VRAM | vLLM in-process inference (Gemma 4 uses ~10GB) |
+| [uv](https://docs.astral.sh/uv/) | Package manager |
+| NVIDIA GPU ≥ 16 GB VRAM | vLLM in-process inference (Gemma 4 ≈ 10 GB) |
 | CUDA 12.x + drivers | Required by vLLM |
-| Docker + NVIDIA Container Toolkit | For `make gc-test` (container testing) |
-| ~15GB disk space | Model weights (~10GB) + guidelines DB (~25MB) + embedding model (~1.2GB) |
-| HuggingFace account | Access to gated models (Gemma 4, embeddinggemma) |
-| `make` | Build automation (standard on Linux/macOS) |
+| Docker + NVIDIA Container Toolkit | For `make gc-test` |
+| ~15 GB disk | Model weights + guidelines DB + embedding model |
+| HuggingFace token | For gated models (Gemma 4, embeddinggemma) |
+| `make` | Build automation |
 
 ## Setup
 
-### 1. Create environment
-
 ```bash
-git clone <repo-url>
-cd chimera-agent-challenge
-uv venv
-source .venv/bin/activate
+git clone <repo-url> && cd chimera-agent-challenge
+uv venv && source .venv/bin/activate
 make install
+cp .env.example .env                    # add HF_TOKEN
 ```
 
-### 2. Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and add your HuggingFace token (get one at
-https://huggingface.co/settings/tokens). Required for downloading
-the Gemma 4 model and the embedding model.
-
-### 3. Accept model licenses
-
-Visit these HuggingFace pages and accept the license:
-- https://huggingface.co/google/gemma-4-E2B-it
-- https://huggingface.co/google/embeddinggemma-300m
-
-### 4. Download model weights
+Accept licenses on
+[Gemma 4](https://huggingface.co/google/gemma-4-E2B-it) and
+[embeddinggemma](https://huggingface.co/google/embeddinggemma-300m),
+then download the LLM and rebuild the guidelines DB:
 
 ```bash
 python -c "from huggingface_hub import snapshot_download; snapshot_download('google/gemma-4-E2B-it', local_dir='model/')"
-```
-
-This downloads ~10GB to `model/`. Skip this step if you want vLLM to
-download on first run (requires internet).
-
-### 5. Build the guidelines database
-
-The guidelines database (`resources/guidelines_db/`) is included in the
-repository and works out of the box. To rebuild it (e.g. after adding
-your own guideline PDFs), run:
-
-```bash
 make process-guidelines
-```
-
-This downloads the embedding model (~1.2GB, saved to
-`resources/embedding_model/`), processes the PDF, and rebuilds the
-database. Takes ~40 seconds on GPU.
-
-### 6. Run tests
-
-```bash
 make test
 ```
-
-### 7. Run the agent
-
-```bash
-make run
-```
-
-First run takes ~30 seconds for vLLM to compile CUDA graphs (cached
-afterwards). Processes all cases in `test/input/task1/` by default.
 
 ## Common commands
 
 ```bash
-# Run on a specific task
-make run RUN_ARGS="paths.input_dir=test/input/task2"
+make run                                                    # task 1
+make run RUN_ARGS="agent.tool_registry=task2 \
+    paths.input_dir=outputs/agent_input/task2"              # task 2
+make run RUN_ARGS="agent.limit=5"                           # smoke 5 cases
+make run RUN_ARGS="+experiment=qwen_local"                  # swap model
 
-# Quick test on one case
-python scripts/sanity_check.py --task task1 --case rumc-001
+python scripts/run_all_tasks.py                             # task 1 then 2
 
-# Lint and format
 make lint
 make format
 
-# Build and test the Grand Challenge container
 make gc-build
-make gc-test                                    # requires GPU + Docker
-make gc-test GC_INPUT_DIR=test/input/task2      # different task
-
-# Export container for upload
-make gc-save
+make gc-test                                                # docker, task 1
+make gc-test GC_INPUT_DIR=outputs/agent_input/task2         # docker, task 2
+make gc-save                                                # export tarballs
 ```
+
+First `make run` takes ~30 s for vLLM to compile CUDA graphs (cached
+after).
 
 ## Project layout
 
 ```
 src/chimera_agent_baseline/
 ├── agent/
-│   ├── graph.py              ReAct agent loop (modify for custom orchestration)
+│   ├── graph.py              ReAct + form-fill wiring (~85 LoC)
+│   ├── form_fill.py          Terminal node: prompt + parse against output schema
 │   └── prompts.py            System prompt (modify to change agent behaviour)
+├── output/
+│   └── schema.py             Pydantic submission contract (Task1Output / Task2Output)
 ├── models/
-│   ├── __init__.py           Model loading (vLLM or OpenAI API)
-│   └── vllm_offline.py       vLLM in-process wrapper
+│   ├── __init__.py           Provider switch (vllm / openai)
+│   ├── vllm_offline.py       vLLM in-process wrapper
+│   └── openai_compat.py      ChatOpenAI subclass that surfaces reasoning_content
 ├── tools/
-│   ├── base.py               ToolSpec + CaseDataStore (infrastructure)
-│   └── definitions.py        Tool definitions (add custom tools here)
-├── mcp_server.py             MCP server + action logging
+│   ├── base.py               ToolSpec + CaseDataStore
+│   └── definitions.py        TASK1_TOOLS / TASK2_TOOLS (add custom tools here)
+├── case_loader.py            Reads <pid>/prompt.json into agent queries
+├── mcp_server.py             MCP server + action log
 ├── rag.py                    Guidelines search (ChromaDB + embeddings)
-├── schemas.py                I/O schemas + prompt templates
-├── skills.py                 Agent Skills loader
-└── utils.py                  Logging setup
+├── run.py                    Local Hydra entry-point
+└── utils.py                  Logging
 
-configs/config.yaml           All parameters (model, generation, paths, agent)
-skills/                       Agent Skills (SKILL.md files)
-resources/                    Guidelines DB + embedding model (generated)
-model/                        LLM weights (downloaded, gitignored)
-test/input/task{1,2,3}/       Test data (queries.json + clinical-data.json)
+configs/config.yaml           Defaults (paths, model, generation, agent)
+configs/experiment/           Overlays via +experiment=<name>
+templates/prompts/            Jinja templates for the agent prompt
+resources/                    Guidelines DB + embedding model + GC config copy
+outputs/agent_input/task{1,2}/<pid>/{prompt,tools}.json   Per-case inputs
 inference.py                  Grand Challenge container entrypoint
-Dockerfile                    Container definition
 ```
 
 ## What to modify
 
-| Goal | File(s) | How |
-|------|---------|-----|
+| Goal | File | How |
+|---|---|---|
 | Change the system prompt | `agent/prompts.py` | Edit `SYSTEM_PROMPT` |
-| Add a clinical tool | `tools/definitions.py` | Add a `ToolSpec` to `TOOL_REGISTRY` |
-| Add a non-data tool | `mcp_server.py` | Add `@mcp.tool()` function |
-| Swap the LLM | `configs/config.yaml` | Change `model.model_id` + `model.tool_parser` |
-| Add a skill | `skills/<name>/SKILL.md` | Create directory + SKILL.md |
-| Change the agent loop | `agent/graph.py` | Replace LangGraph with your own orchestration |
-| Add knowledge to RAG | `scripts/process_guidelines.py` | Change PDF path, rerun |
-| Use a different framework | Replace `agent/`, `run.py` | Keep MCP server + schemas |
+| Edit the per-case prompt | `templates/prompts/agent_prompt.j2` | Jinja2 |
+| Add a clinical tool | `tools/definitions.py` | Append `ToolSpec` to `TASK1_TOOLS` / `TASK2_TOOLS` |
+| Add a non-data tool | `mcp_server.py` | New `@mcp.tool()` function |
+| Swap the LLM (vLLM) | `configs/config.yaml` | `model.model_id` + `model.tool_parser` |
+| Swap the LLM (OpenAI-compatible) | `configs/experiment/*.yaml` | `+experiment=<name>` |
+| Change the agent loop | `agent/graph.py` | Edit graph nodes / router |
+| Tune the form-fill prompt / retry | `agent/form_fill.py` | Skeleton + retry logic — but keep the schema |
+| Rebuild the RAG corpus | `scripts/process_guidelines.py` | Pass your PDF |
 
 ## What NOT to modify
 
-- **`schemas.py`** — output format is part of the challenge specification
-- **`mcp_server.py` action logging** — the action log must remain intact for evaluation
-- **`inference.py`** — Grand Challenge entrypoint (structure must stay compatible)
+- `output/schema.py` — submissions whose final output does not validate
+  against `Task1Output` / `Task2Output` are rejected. Add tools, change
+  prompts, swap orchestration, but keep this shape.
+- `mcp_server.py` action-log layer — the log is part of the evaluation.
+- `inference.py` — the GC container entry-point's external interface.
 
 ## Switching models
 
-See [docs/models.md](models.md) for detailed instructions. Quick version:
+See [docs/models.md](models.md). One-liner via experiment overlay:
 
-```yaml
-# configs/config.yaml
-model:
-  model_id: meta-llama/Llama-3.1-8B-Instruct
-  tool_parser: llama
+```bash
+make run RUN_ARGS="+experiment=qwen_local"
 ```
-
-Download weights, and you're done. No code changes needed.
 
 ## Container workflow
 
-The Grand Challenge container runs everything in a single process:
-vLLM loads the model, MCP server provides tools, agent runs the
-ReAct loop. No network access.
-
 ```bash
-# Build
 make gc-build
-
-# Test locally (mirrors GC runtime: --gpus all, --network none)
-make gc-test
-
-# Export for upload
-make gc-save
-# Uploads: chimera-agent-baseline.tar.gz (Algorithm > Containers)
-#          model.tar.gz (Algorithm > Models)
+make gc-test                                                # local sanity check
+make gc-save                                                # export tarballs
 ```
 
-See the [Grand Challenge documentation](https://grand-challenge.org/documentation/)
+See the
+[Grand Challenge documentation](https://grand-challenge.org/documentation/)
 for container conventions.
 
 ## Troubleshooting
 
-**"CUDA out of memory"**: Reduce `generation.max_model_len` in config
-(default: 32768). Try 8192 for 16GB GPUs.
-
-**"Guidelines DB not found"**: Run `make process-guidelines`. Requires
-HF_TOKEN in `.env` for the embedding model download.
-
-**Model downloads fail (403 Forbidden)**: Accept the model license on
-HuggingFace and ensure HF_TOKEN is set in `.env`.
-
-**vLLM compilation takes long**: First run compiles CUDA graphs (~30s).
-This is cached in `~/.cache/vllm/` for subsequent runs.
-
-**Container permission error on `/output`**: Run
-`chmod 777 test/output` before `make gc-test`.
+- **CUDA OOM**: lower `generation.max_model_len` (default 32768) — try 8192.
+- **Guidelines DB missing**: `make process-guidelines` (needs `HF_TOKEN`).
+- **HF 403 Forbidden**: accept the model license on HuggingFace.
+- **vLLM compile takes long on first run**: ~30 s, cached in `~/.cache/vllm/`.
+- **`make gc-test` permission error on `/output`**: `chmod 777 test/output`.

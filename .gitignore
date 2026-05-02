@@ -21,6 +21,12 @@ logs/
 /data/
 *.sqsh
 
+# Maintainer-only cluster targets — auto-included by Makefile when present.
+Makefile.cluster
+
+# Claude Code session state (per-machine, not source).
+.claude/
+
 # Internal docs (not published)
 docs/internal/
 

@@ -52,26 +52,6 @@ scripts/slurm/                  SLURM job scripts (run, dev)
 scripts/docker/                 Project Dockerfile
 ```
 
-## Data layout on happiny
-
-```
-/data/pathology/projects/sander/projects/chimera_agent_baseline/
-├── outputs/        <- agent outputs
-├── logs/           <- SLURM logs
-└── code/           <- rsync'd source code (make sync)
-```
-
-Locally mounted at: `/Volumes/temporary/sander/projects/chimera_agent_baseline/`
-
-### NAS filesystem restrictions
-
-The shared filesystem may **not** support changing file or directory permissions:
-
-- **`shutil.copyfile()`** — works (copies data only)
-- **`shutil.copy()`** / **`shutil.copy2()`** — **fails** (copies mode bits)
-- **`os.chmod()`** — **fails** (`Operation not permitted`)
-- **Hardlinks** and **symlinks** — work fine
-
 ## Workflows
 
 ### Local development
@@ -82,23 +62,11 @@ make test
 make run
 ```
 
-### Submit to cluster
+### Grand Challenge container
 ```bash
-make submit                              # default tier (medium)
-make submit TIER=high                    # high-VRAM nodes
-```
-
-### Dev session on cluster
-```bash
-make dev                                 # default tier
-make dev TIER=high                       # high-VRAM node
-```
-
-### Monitoring
-```bash
-make status    # your jobs
-make logs      # tail latest output
-make cancel    # cancel latest job
+make gc-build                            # build the GC Docker image
+make gc-run INPUT=outputs/agent_input/task1
+make gc-save                             # export image + model tarballs
 ```
 
 ## Environment variables

@@ -200,126 +200,27 @@ def _extract_reasoning_prefix(clean_text: str, tool_calls: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tool-call parsing — dispatches to the right parser based on model format
+# Tool-call parsing — dispatches to vLLM's offline parser-utils module
+# matching the configured ``tool_parser`` name. Standard vLLM ships
+# ``<name>_utils.parse_tool_calls`` for gemma4, hermes, llama, mistral,
+# pythonic, and others. If you need a model with a parser not in vLLM,
+# either contribute the matching ``*_utils`` module upstream or use the
+# OpenAI-compatible provider (configs/experiment/qwen_local.yaml) instead.
 # ---------------------------------------------------------------------------
-
-# Map parser name → vLLM utils module that has a parse_tool_calls() function.
-# Not all parsers have an offline utils module; those fall through to the
-# generic JSON parser.
-_VLLM_UTILS_MODULES: dict[str, str] = {
-    "gemma4": "vllm.tool_parsers.gemma4_utils",
-}
 
 
 def _parse_tool_calls(text: str, parser: str = "gemma4") -> list[dict]:
-    """Extract tool calls from decoded model output.
+    """Extract tool calls from decoded model output via vLLM's parser utils."""
+    import importlib
 
-    Tries (in order):
-    1. A vLLM offline utils module for the parser (e.g. ``gemma4_utils``)
-    2. A generic JSON-based parser that handles the most common formats
-       (Hermes, Llama, Qwen, Mistral — anything using JSON tool calls)
-    """
-    # Try vLLM's model-specific offline parser
-    module_path = _VLLM_UTILS_MODULES.get(parser)
-    if module_path:
-        try:
-            import importlib
-
-            mod = importlib.import_module(module_path)
-            return mod.parse_tool_calls(text, strict=False)
-        except (ImportError, AttributeError):
-            log.debug("vLLM parser '%s' unavailable, falling back to generic JSON parser", parser)
-
-    # Generic JSON-based parser — covers Hermes, Llama, Qwen, Mistral, etc.
-    results = _parse_json_tool_calls(text)
-    if not results and text.strip():
-        log.debug("No tool calls parsed from output: %.200s", text)
-    return results
-
-
-def _parse_json_tool_calls(text: str) -> list[dict]:
-    """Parse tool calls from models that use JSON inside XML-like tags.
-
-    Handles common patterns::
-
-        <tool_call>{"name": "func", "arguments": {"key": "val"}}</tool_call>
-        <|python_tag|>{"name": "func", "parameters": {"key": "val"}}
-        {"name": "func", "arguments": {"key": "val"}}
-
-    Also handles Gemma 4's ``call:name{args}`` as a fallback.
-    """
-    import re
-
-    results = []
-
-    # Pattern 1: JSON inside <tool_call> tags (Hermes, Qwen, many others)
-    for match in re.finditer(r"</?tool_call>?\s*(\{.*?\})\s*(?:</tool_call>)?", text, re.DOTALL):
-        results.extend(_try_parse_json_tool_call(match.group(1)))
-
-    if results:
-        return results
-
-    # Pattern 2: raw JSON objects with "name" and "arguments"/"parameters"
-    for match in re.finditer(r'\{"name"\s*:\s*"[^"]+"\s*,\s*"(?:arguments|parameters)"\s*:', text, re.DOTALL):
-        # Find the full JSON object
-        start = match.start()
-        depth, i = 0, start
-        while i < len(text):
-            if text[i] == "{":
-                depth += 1
-            elif text[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    results.extend(_try_parse_json_tool_call(text[start : i + 1]))
-                    break
-            i += 1
-
-    if results:
-        return results
-
-    # Pattern 3: Gemma 4 bare format — call:name{args}
-    for match in re.finditer(r"(?:^|\s|>)call:(\w+)\{(.*?)\}", text, re.DOTALL):
-        name, args_str = match.group(1), match.group(2)
-        results.append({"name": name, "arguments": _parse_kv_args(args_str)})
-
-    return results
-
-
-def _try_parse_json_tool_call(text: str) -> list[dict]:
-    """Try to parse a JSON string as a tool call."""
+    module_path = f"vllm.tool_parsers.{parser}_utils"
     try:
-        obj = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
+        mod = importlib.import_module(module_path)
+    except ImportError:
+        log.debug("vLLM tool-parser module %s not found", module_path)
         return []
-
-    if isinstance(obj, dict) and "name" in obj:
-        args = obj.get("arguments") or obj.get("parameters") or {}
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except (json.JSONDecodeError, ValueError):
-                args = {}
-        return [{"name": obj["name"], "arguments": args}]
-    return []
-
-
-def _parse_kv_args(args_str: str) -> dict:
-    """Parse Gemma 4's ``key:<|"|>value<|"|>`` format into a dict."""
-    if not args_str.strip():
-        return {}
-
-    cleaned = args_str.replace('<|"|>', '"')
     try:
-        return json.loads("{" + cleaned + "}")
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    import re
-
-    result = {}
-    for key, value in re.findall(r'(\w+):\s*"([^"]*)"', cleaned):
-        result[key] = value
-    if not result:
-        for key, value in re.findall(r"(\w+):\s*([^,}]+)", args_str):
-            result[key] = value.strip().strip('"').replace('<|"|>', "")
-    return result
+        return mod.parse_tool_calls(text, strict=False)
+    except AttributeError:
+        log.debug("vLLM module %s has no parse_tool_calls()", module_path)
+        return []

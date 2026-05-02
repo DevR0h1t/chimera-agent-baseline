@@ -1,166 +1,109 @@
 # Architecture
 
-## Overview
+## Graph
 
-The baseline agent has four main components:
+```
+HumanMessage(prompt)
+        │
+        ▼
+  ┌──────────┐  tool_calls    ┌──────────┐
+  │  agent   │───────────────▶│  tools   │  (MCP, stdio)
+  │  (LLM)   │◀───────────────│          │
+  └────┬─────┘   results      └──────────┘
+       │ no tool_calls
+       ▼
+  ┌──────────────┐
+  │ form_fill    │  same model + per-case Pydantic schema
+  │ (LLM)        │  validated via PydanticOutputParser, retried up to 3×
+  └──────┬───────┘
+         ▼
+       END  →  structured_response + reasoning_trace + action_log
+```
 
-![System Architecture](images/architecture.png)
+The same model is used for both ReAct turns and the terminal form-fill;
+the form-fill node prompts it with a concrete JSON skeleton (not a JSON
+schema dump — small models echo schemas back). This is provider-neutral:
+any LangChain `BaseChatModel` works.
 
-The agent calls tools via MCP, reasons over the results, and produces a
-prediction with a reasoning trace. The MCP server records every tool call
-in an action log for evaluation.
+**Source**: `src/chimera_agent_baseline/agent/graph.py`,
+`src/chimera_agent_baseline/run.py`.
 
-## MCP Tool Server
+## MCP tool server
 
 All tools are exposed via the [Model Context Protocol](https://modelcontextprotocol.io).
-The server runs as a subprocess (stdio transport) and is
-framework-agnostic — any MCP client works, not just LangGraph.
+The server runs as a stdio subprocess and is framework-agnostic.
 
-**Source**: `src/chimera_agent_baseline/mcp_server.py`
+**Source**: `src/chimera_agent_baseline/mcp_server.py`.
 
-### Built-in tools
+Two registries, selected at startup via `--tool-registry task1|task2`:
 
-| Tool | Purpose | Source data |
-|------|---------|-------------|
-| `get_clinical_info` | Patient demographics, PSA, history | `clinical-data.json` |
-| `get_gleason_grades` | Gleason patterns + ISUP grade | `clinical-data.json` |
-| `get_mri_findings` | PI-RADS, lesion detection, volume | `clinical-data.json` |
-| `get_pathology_staging` | pT / N / M classification | `clinical-data.json` |
-| `get_surgical_pathology` | Margins, capsular penetration, LVI | `clinical-data.json` |
-| `get_follow_up` | BCR status, follow-up timeline | `clinical-data.json` |
-| `search_guidelines` | Semantic search over EAU guidelines | `resources/guidelines_db/` |
-| `load_skill` | Load Agent Skill instructions | `skills/*/SKILL.md` |
-| `get_action_log` | Retrieve recorded tool calls (runner-only) | In-memory |
+| Tool | Task 1 | Task 2 | Returns |
+|---|---|---|---|
+| `get_psa_trend` | ✓ | — | Prior PSA values as a time series |
+| `get_lab_results` | ✓ | — | Full lab panel |
+| `get_mri_report` | ✓ | ✓ | mpMRI prose + PI-RADS / PSAD / volume / csPCa |
+| `get_pathology_report` | ✓ | ✓ (richer) | Biopsy report + Gleason / ISUP / GP4 |
+| `get_previous_notes` | ✓ | ✓ | Prior GP / urology notes |
+| `get_family_history` | ✓ | ✓ | First-degree PCa history |
+| `search_guidelines` | ✓ | ✓ | Semantic search over EAU corpus |
+| `get_action_log` | runner-only | runner-only | The append-only action log |
+
+For Task 2, lab panel and PSA trend are surfaced in the prompt context
+up front (the urologist arrives at the MDT with them), so the matching
+tools are dropped from the registry.
 
 ### Adding a custom tool
 
-1. Define a `ToolSpec` in `src/chimera_agent_baseline/tools/definitions.py`:
+Define a `ToolSpec` in `src/chimera_agent_baseline/tools/definitions.py`
+and append it to `TASK1_TOOLS` (or `TASK2_TOOLS`):
 
 ```python
 MY_TOOL = ToolSpec(
     name="get_my_data",
     description="Retrieve my custom data for a patient case.",
-    field_mapping={
-        "case_id": ["case_id"],
-        "my_field": ["source_field_variant_a", "source_field_variant_b"],
-    },
+    fields=("my_field", "another_field"),
 )
 ```
 
-2. Add it to `TOOL_REGISTRY` at the bottom of the same file.
+`fields` lists the top-level keys from each case's `tools.json` that
+this tool should return. Missing keys are silently omitted (so a
+biopsy-naïve case calling `get_pathology_report` returns just
+`{case_id}` plus a "no data" note). For tools that don't follow the
+precomputed-data pattern (e.g. an API call), register them directly in
+`mcp_server.py` with the `@mcp.tool()` decorator (see
+`search_guidelines`).
 
-The field mapping handles different naming conventions across data sources
-(RUMC vs. Karolinska). Source fields are tried in order — first match wins.
+## Action log
 
-For tools that don't follow the precomputed-data pattern (e.g. an API call
-or a computation), register them directly in `mcp_server.py` using the
-`@mcp.tool()` decorator, similar to `search_guidelines`.
+The MCP server logs every tool call with `tool`, `args`, `result`,
+`timestamp`. The runner calls `get_action_log` per case to retrieve and
+clear it. This is used for faithfulness evaluation — verifying the
+agent's reasoning trace references evidence it actually fetched.
 
-### Action log
+## RAG (search_guidelines)
 
-Every tool call is automatically logged by the MCP server with `tool`,
-`args`, `result`, and `timestamp`. After each case, the runner calls
-`get_action_log` to retrieve the log. This is used for faithfulness
-evaluation — verifying that the agent's reasoning trace references
-evidence it actually retrieved.
+Clinical guidelines are chunked, embedded with
+`google/embeddinggemma-300m`, and persisted to ChromaDB at
+`resources/guidelines_db/`. The embedding model runs in a separate
+process on CPU (sentence-transformers via UDS), so it does not compete
+with the agent LLM for GPU memory.
 
-Participants do not need to implement logging — it's built into the
-MCP server. Any framework that talks to the MCP server gets its calls
-logged.
-
-## Agent Skills
-
-Skills follow the [Agent Skills](https://agentskills.io) open standard.
-Each skill is a directory with a `SKILL.md` file containing YAML
-frontmatter (name + description) and markdown instructions.
-
-**Location**: `skills/`
-
-```
-skills/
-└── guideline-search/
-    └── SKILL.md
-```
-
-At startup, only skill metadata (name + description) is injected into the
-system prompt. The agent can call `load_skill("guideline-search")` to get
-the full instructions on demand (progressive disclosure).
-
-### Adding a skill
-
-Create a new directory in `skills/` with a `SKILL.md`:
-
-```markdown
----
-name: my-skill
-description: >
-  What this skill does and when the agent should use it.
-  Include keywords that help the agent recognize relevant scenarios.
----
-
-## When to use
-
-Describe the scenarios where this skill applies.
-
-## Instructions
-
-Step-by-step guidance for the agent.
-```
-
-The skill is picked up automatically — no code changes needed.
-
-## Guidelines Search (RAG)
-
-Clinical guidelines are chunked, embedded, and stored in ChromaDB for
-semantic retrieval via the `search_guidelines` tool.
-
-**Database**: `resources/guidelines_db/` (persisted ChromaDB)
-**Embedding model**: `resources/embedding_model/` (google/embeddinggemma-300m)
-
-The baseline database contains the
-[EAU Prostate Cancer Guidelines (2026)](https://uroweb.org/guidelines/prostate-cancer).
-It is pre-built and included in the repository.
-
-### Rebuilding with different guidelines
-
-1. Place your guideline PDF at a known path
-2. Run:
+To rebuild with different guidelines:
 
 ```bash
 python scripts/process_guidelines.py --pdf path/to/your/guidelines.pdf
 ```
 
-This extracts text, chunks it (~1000 chars with 200 overlap), embeds with
-embeddinggemma-300m, and persists to `resources/guidelines_db/`. The
-embedding model is saved to `resources/embedding_model/` so the container
-doesn't need network access at runtime.
+## Output
 
-Requires `HF_TOKEN` in `.env` for the embedding model download.
+Each case writes
+`test/output/predictions/task<N>/<pid>.json` with:
 
-## Output Format
-
-Each case produces:
-
-```json
-{
-    "case_id": "rumc-001",
-    "cspca_probability": 0.45,
-    "biopsy_recommendation": true,
-    "reasoning_trace": "PSA is 23.5 which is elevated. ISUP grade 5 indicates...",
-    "action_log": [
-        {"tool": "get_clinical_info", "args": {"case_id": "rumc-001"},
-         "result": {"psa": 23.5, ...}, "timestamp": "..."},
-        ...
-    ]
-}
-```
-
-| Field | Who produces it | Purpose |
-|-------|----------------|---------|
-| Prediction fields | The LLM | Scored numerically (AUROC, C-index) |
-| `reasoning_trace` | The LLM | Qualitative evaluation of clinical reasoning |
-| `action_log` | The MCP server | Faithfulness verification — ground truth of what was retrieved |
-
-The `reasoning_trace` should reference specific values from the tools.
-The `action_log` is used to verify those references are grounded in
-actual evidence (not hallucinated).
+| Field | Source | Purpose |
+|---|---|---|
+| Decision fields (`biopsy_recommendation`, `cspca_probability_self`, `treatment_recommendation`, …) | form-fill node | Scored numerically |
+| `confidence`, `decision_summary`, `variable_ratings` | form-fill node | Reasoning capture |
+| `reasoning_trace` | last assistant message | Qualitative review |
+| `thinking_trace[]` | `additional_kwargs.reasoning_content` | Captured for models that emit chain-of-thought separately (Qwen3+, OpenAI o1) |
+| `action_log[]` | MCP server | Faithfulness verification |
+| `form_fill_warnings[]` | form-fill node | Validation retries / post-hoc downgrades |

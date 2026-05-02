@@ -1,84 +1,114 @@
 # Model Configuration
 
-## How it works
+The agent supports two model providers, switched via `model.provider`:
 
-The agent uses [vLLM](https://docs.vllm.ai) for in-process inference. The
-model is loaded directly into GPU memory — no HTTP server, no network access.
-This is the same setup used in the Grand Challenge container.
+- **`vllm`** — in-process inference via [vLLM](https://docs.vllm.ai).
+  Single-process, no network. This is what the Grand Challenge
+  container uses.
+- **`openai`** — any OpenAI-compatible HTTP endpoint (llama.cpp's
+  `llama-server`, vLLM's OpenAI server, OpenAI itself). Useful for
+  swapping models without rebuilding vLLM and for verifying that the
+  orchestration is provider-neutral.
 
-The model must support **tool calling** — the ability to output structured
-function calls that the ReAct loop can execute.
+Both return a LangChain `BaseChatModel`; the agent graph (ReAct +
+form-fill) does not care which is used.
 
-## Default model (Gemma 4 E2B-it)
-
-The baseline ships with [Gemma 4 E2B-it](https://huggingface.co/google/gemma-4-E2B-it),
-a 2.3B-parameter model with native function calling (~10GB in bf16).
+## Default — Gemma 4 E2B-it via vLLM
 
 ```yaml
 # configs/config.yaml
 model:
+  provider: vllm
   model_id: google/gemma-4-E2B-it
   tool_parser: gemma4
 ```
 
-Download the weights:
+Download:
 
 ```bash
-python -c "from huggingface_hub import snapshot_download; snapshot_download('google/gemma-4-E2B-it', local_dir='model/')"
+python -c "from huggingface_hub import snapshot_download; \
+    snapshot_download('google/gemma-4-E2B-it', local_dir='model/')"
 ```
 
-When `model/` contains weights, they're loaded locally. When empty, vLLM
-downloads from HuggingFace Hub using `model_id`.
+When `model/` is non-empty those weights are loaded; otherwise vLLM
+downloads from HuggingFace using `model_id`.
 
-## Swapping to a different model
-
-Two things to change in `configs/config.yaml`:
+## Swapping the vLLM model
 
 ```yaml
 model:
+  provider: vllm
   model_id: meta-llama/Llama-3.1-8B-Instruct
   tool_parser: llama
 ```
 
-Then download the weights:
+Download the weights, no code changes needed.
 
-```bash
-python -c "from huggingface_hub import snapshot_download; snapshot_download('meta-llama/Llama-3.1-8B-Instruct', local_dir='model/')"
-```
+### Tool-call parsers
 
-No code changes needed.
-
-## Tool call parsers
-
-Different models use different formats for function calling. The `tool_parser`
-field tells the system how to parse the model's output.
-
-| Parser | Models | Format |
-|--------|--------|--------|
+| `tool_parser` | Models | Format |
+|---|---|---|
 | `gemma4` | Gemma 4 | `call:func_name{key:value}` |
 | `hermes` | Hermes, many fine-tunes | `<tool_call>{"name": ...}</tool_call>` |
-| `llama` | Llama 3.x | JSON-based tool calls |
+| `llama` | Llama 3.x | JSON-based |
 | `mistral` | Mistral, Mixtral | `[TOOL_CALLS]` + JSON |
 | `pythonic` | Python-style calls | `func_name(arg=val)` |
 
-List all parsers in your vLLM installation:
+List parsers available in your vLLM install:
 
 ```bash
-ls $(python -c "import vllm.tool_parsers; print(vllm.tool_parsers.__path__[0])")/*_tool_parser.py
+ls "$(python -c 'import vllm.tool_parsers; print(vllm.tool_parsers.__path__[0])')"/*_tool_parser.py
 ```
 
-The parser has a fallback chain: model-specific vLLM parser → generic JSON
-parser → Gemma 4 bare format. For most models, setting the right
-`tool_parser` value is sufficient.
+Fallback chain: model-specific vLLM parser → generic JSON parser →
+Gemma 4 bare format.
+
+## Using an OpenAI-compatible server
+
+`configs/experiment/qwen_local.yaml` shows a working setup for
+[llama.cpp's server](https://github.com/ggerganov/llama.cpp) serving
+Qwen3 over `http://127.0.0.1:8765/v1`. Spin it up:
+
+```bash
+LLAMA_CTX=16384 ~/.local/bin/llama-start
+make run RUN_ARGS="+experiment=qwen_local"
+```
+
+Minimum config:
+
+```yaml
+# @package _global_
+model:
+  provider: openai
+  model_id: <whatever the server reports in /v1/models>
+  base_url: http://127.0.0.1:8765/v1
+  api_key_env: LLAMA_API_KEY        # env var with the bearer token
+  request_timeout: 600
+  extra_body:                       # forwarded as-is per request
+    reasoning_budget_tokens: 4096   # llama.cpp soft cap on <think> length
+```
+
+`extra_body` is passed straight to `ChatOpenAI` and into the request
+body, so any provider-specific knob (e.g. `reasoning_budget_tokens`,
+`chat_template_kwargs`) works.
+
+### Reasoning content propagation
+
+`langchain_openai`'s default `ChatOpenAI` discards the
+`reasoning_content` field that providers like llama.cpp / Qwen3 put on
+the assistant message. The `ChatOpenAICompat` subclass at
+`src/chimera_agent_baseline/models/openai_compat.py` copies it onto
+`AIMessage.additional_kwargs["reasoning_content"]`, and `run.py`
+collects every assistant turn's reasoning into a `thinking_trace[]` in
+the prediction record.
 
 ## Experiment overlays
-
-Test different models without editing the base config:
 
 ```yaml
 # configs/experiment/llama8b.yaml
 # @package _global_
 model:
+  provider: vllm
   model_id: meta-llama/Llama-3.1-8B-Instruct
   tool_parser: llama
 generation:
@@ -91,14 +121,12 @@ make run RUN_ARGS="+experiment=llama8b"
 
 ## Choosing a model
 
-Key considerations:
-
-- **Tool calling support** — the model must output structured function calls.
-  Most instruction-tuned models support this.
-- **Size vs. GPU memory** — Grand Challenge offers T4 (16GB) or A10G (24GB).
-  Gemma 4 E2B (2.3B, ~10GB bf16) fits comfortably. Larger models may need
-  quantization.
-- **vLLM support** — verify your model architecture is
-  [supported by vLLM](https://docs.vllm.ai/en/latest/models/supported_models.html).
-- **Tool parser** — check that a matching `tool_parser` exists. The generic
-  JSON fallback handles most cases.
+- **Tool calling** is required by the ReAct loop. The form-fill node
+  does **not** use function calling — it goes through prompt +
+  `PydanticOutputParser`, so even models with weak tool calling work
+  for that step.
+- **GPU memory**: Grand Challenge offers T4 (16 GB) or A10G (24 GB).
+  Gemma 4 E2B (≈ 10 GB bf16) fits comfortably; larger models may need
+  quantisation.
+- **vLLM support**: verify the architecture is in vLLM's
+  [supported list](https://docs.vllm.ai/en/latest/models/supported_models.html).

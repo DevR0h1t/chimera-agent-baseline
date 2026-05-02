@@ -1,41 +1,54 @@
 # =============================================================================
-# Chimera Agent Baseline — Default configuration
+# Chimera Agent Baseline — default config.
 #
 # All parameters live here, not in code.
 # Override per-experiment with +experiment=name or bare key=value on the CLI.
 #
-# Usage:
 #   make run                                                 # uses this file
-#   make run RUN_ARGS="model.model_id=meta-llama/..."        # CLI override
-#   make run RUN_ARGS="+experiment=my_experiment"             # experiment overlay
-#   make run RUN_ARGS="paths.input_dir=test/input/task2"     # different task
+#   make run RUN_ARGS="agent.tool_registry=task2 \
+#       paths.input_dir=outputs/agent_input/task2"           # task 2
+#   make run RUN_ARGS="+experiment=qwen_local"               # swap model
+#   make run RUN_ARGS="agent.limit=5"                        # first 5 cases
 # =============================================================================
 
 defaults:
   - _self_
 
 # --- Paths ---
-# Local defaults mirror the Grand Challenge filesystem layout.
-# In the GC container these are overridden to /input, /output, etc.
+# In the Grand Challenge container these are overridden to /input, /output, etc.
 paths:
-  input_dir: test/input/task1
+  input_dir: outputs/agent_input/task1
   output_dir: test/output
   resource_dir: resources
   model_dir: model
 
 # --- Model ---
-# In-process inference via vLLM. Model loaded from paths.model_dir
-# (if non-empty) or downloaded from HuggingFace Hub via model_id.
+# provider=vllm   -- in-process inference via vLLM (the GC container path).
+# provider=openai -- any OpenAI-compatible HTTP endpoint (llama.cpp server,
+#                    vLLM OpenAI server, OpenAI itself). Set base_url and
+#                    optionally api_key_env.
 model:
+  provider: vllm
   model_id: google/gemma-4-E2B-it
-  # Tool call parser — must match your model's function-calling format.
-  # Common values: gemma4, hermes, llama, mistral, pythonic
+  # vLLM tool-call parser — must match the model's function-calling format.
+  # Ignored when provider=openai (the server speaks the protocol natively).
+  # Common values: gemma4, hermes, llama, mistral, pythonic.
   tool_parser: gemma4
+  # OpenAI-compatible server settings (used only when provider=openai).
+  base_url: null                # e.g. http://127.0.0.1:8765/v1
+  api_key_env: LLAMA_API_KEY    # env var holding the bearer token
+  request_timeout: 600
 
 # --- Agent ---
 agent:
   max_iterations: 25             # max ReAct loop steps before stopping
   step_timeout: 120              # seconds per graph step
+  # Which task's tool set to expose: 'task1' (biopsy decision) or 'task2'
+  # (treatment decision). Pair the registry with the matching input dir.
+  tool_registry: task1
+  # Optional case-subset filters. ``pids`` wins over ``limit`` when both set.
+  pids: null
+  limit: null
 
 # --- Logging ---
 logging:
@@ -45,7 +58,7 @@ logging:
 generation:
   temperature: 1.0
   max_new_tokens: 4096
-  max_model_len: 32768           # vLLM context window (Gemma 4 supports up to 128K)
+  max_model_len: 32768           # vLLM context window
   top_p: 0.95
 
 # --- Hydra settings ---

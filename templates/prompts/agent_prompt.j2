@@ -1,0 +1,88 @@
+{# Baseline agent prompt template.
+
+  Receives a ``prompt.json`` payload in scope. Participants can copy this
+  file to a path of their choosing and pass that path to
+  ``render_baseline_prompt`` to swap the framing without touching the
+  framework code.
+
+  The narrative below mirrors the always-visible block on page 1 of the
+  urologist form. Reveal-on-click data (MRI report, pathology report,
+  previous notes, family history; for Task 1 also lab panel and PSA
+  history) MUST be retrieved via MCP tools — never inlined here.
+#}
+You are a senior urologist reviewing a patient case. Use the available
+tools (radiology / MRI report, pathology report, previous notes, family
+history, and — for biopsy decisions — lab panel and PSA history) when you
+need to consult a piece of information that isn't in this summary.
+
+Case ID: {{ case_id }}
+Task: {{ task }}
+
+Encounter: {{ encounter.department }} on {{ encounter.date }}.
+Referrer: {{ encounter.referrer }}.
+Type: {{ encounter.type }}.
+
+Headline values (always visible at the start of the consult):
+  - {{ patient.age }}-year-old male
+  - PSA {{ current_psa.value }} ng/mL{% if current_psa.date %} (drawn {{ current_psa.date }}){% endif %}
+
+Vitals: {% set v = patient.vitals -%}
+{%- set parts = [] -%}
+{%- if v.weight %}{% set _ = parts.append('weight ' ~ v.weight) %}{% endif -%}
+{%- if v.height %}{% set _ = parts.append('height ' ~ v.height) %}{% endif -%}
+{%- if v.bmi %}{% set _ = parts.append('BMI ' ~ v.bmi) %}{% endif -%}
+{%- if v.bp %}{% set _ = parts.append('BP ' ~ v.bp) %}{% endif -%}
+{%- if v.hr %}{% set _ = parts.append('HR ' ~ v.hr) %}{% endif -%}
+{{ parts | join(', ') if parts else 'not recorded' }}.
+{% if v.smoking %}Smoking: {{ v.smoking }}.{% endif %}
+
+Allergies: {{ patient.allergies | join(', ') if patient.allergies else 'NKA' }}.
+Active medication: {{ patient.medication or 'none recorded' }}.
+Problem list / PMHx: {{ patient.pmhx | join(', ') if patient.pmhx else 'none recorded' }}.
+
+{% for section in note_sections -%}
+{{ section.s }}: {{ section.t }}
+
+{% endfor -%}
+
+{% set s = patient.social -%}
+{%- set social_parts = [] -%}
+{%- if s.occupation %}{% set _ = social_parts.append(s.occupation) %}{% endif -%}
+{%- if s.marital %}{% set _ = social_parts.append(s.marital) %}{% endif -%}
+{%- if s.living %}{% set _ = social_parts.append(s.living) %}{% endif -%}
+{%- if social_parts %}Patient info: {{ social_parts | join('; ') }}.{% endif %}
+{%- if s.next_of_kin %}
+Next of kin: {{ s.next_of_kin }}.{% endif %}
+
+{% set lf = patient.lifestyle -%}
+{%- set lf_parts = [] -%}
+{%- if lf.alcohol %}{% set _ = lf_parts.append('alcohol ' ~ lf.alcohol) %}{% endif -%}
+{%- if lf.exercise %}{% set _ = lf_parts.append('exercise ' ~ lf.exercise) %}{% endif -%}
+{%- if lf.ipss %}{% set _ = lf_parts.append(lf.ipss) %}{% endif -%}
+{%- if lf_parts %}Lifestyle: {{ lf_parts | join('; ') }}.{% endif %}
+
+{% if recent_other %}Recent other appointments: {{ recent_other | join('; ') }}.{% endif %}
+{% if admin %}Admin: {{ admin }}{% endif %}
+
+{% if labs %}
+Lab panel (already in hand at this consult):
+{% for l in labs %}  - {{ l.name }}: {{ l.val }}{% if l.flag %} [{{ l.flag }}]{% endif %} ({{ l.date }})
+{% endfor %}
+{% endif %}
+{% if psa_trend %}
+PSA history (already in hand at this consult):
+{% for p in psa_trend %}  - {{ p.date }}: {{ p.val }} ng/mL
+{% endfor %}
+{% endif %}
+
+Information you can request via tools (mirroring what the urologist would
+order or actively elicit during the consult):
+  - radiology / MRI report (PI-RADS, prostate volume, PSA density, AI csPCa probability)
+  - pathology report ({{ 'Gleason / ISUP / cores / growth pattern / PNI / LVI / AI-predicted ISUP' if task == 'risk_stratification' else 'biopsy results if available' }})
+  - previous GP / urology consultation notes
+  - family history of prostate cancer (anamnesis){% if task != 'risk_stratification' %}
+  - lab panel
+  - PSA history trend{% endif %}
+
+Question:
+{{ query }}

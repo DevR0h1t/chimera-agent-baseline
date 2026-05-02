@@ -166,11 +166,13 @@ def chunk_text(pages: list[dict]) -> list[dict]:
 
         section = detect_section(full_text, pos, section_headers)
 
-        chunks.append({
-            "text": chunk_text_str,
-            "page": page_num,
-            "section": section,
-        })
+        chunks.append(
+            {
+                "text": chunk_text_str,
+                "page": page_num,
+                "section": section,
+            }
+        )
 
         # Advance with overlap
         pos = max(pos + 1, end - CHUNK_OVERLAP)

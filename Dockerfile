@@ -35,9 +35,11 @@ COPY --chown=user:user src/ /opt/app/src/
 COPY --chown=user:user inference.py /opt/app/
 RUN pip install --no-cache-dir --no-deps .
 
-# Copy resources (config, RAG data, etc.) and skills
+# Copy configs (single source of truth — same file Hydra reads locally),
+# Jinja prompt templates, and runtime resources (RAG DB + embedding model).
+COPY --chown=user:user configs/ /opt/app/configs/
+COPY --chown=user:user templates/ /opt/app/templates/
 COPY --chown=user:user resources/ /opt/app/resources/
-COPY --chown=user:user skills/ /opt/app/skills/
 
 USER user
 

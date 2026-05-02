@@ -12,6 +12,7 @@ authors = [{ name = "Sander Moonemans" }]
 dependencies = [
     "langgraph",
     "langchain",
+    "langchain-openai",
     "langchain-mcp-adapters",
     "mcp",
     "chromadb",

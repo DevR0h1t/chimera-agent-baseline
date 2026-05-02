@@ -7,7 +7,7 @@ Start here: **[User Manual](user-manual.md)** — requirements, setup, first run
 ## Reference
 
 - **[Architecture](architecture.md)** — how the agent works, how to add
-  tools, skills, and knowledge
+  tools and knowledge
 - **[Model Configuration](models.md)** — swapping models, tool call parsers,
   experiment overlays
 - **[Challenge Tasks](chimera.md)** — task definitions, inputs, outputs,

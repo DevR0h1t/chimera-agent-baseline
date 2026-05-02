@@ -1,133 +1,137 @@
-"""Tool definitions for the CHIMERA-Agent challenge.
+"""Tool definitions for the CHIMERA-Agent baseline.
 
-Each :class:`~chimera_agent_baseline.tools.base.ToolSpec` declares a
-normalized field mapping that bridges the different naming conventions
-across data sources (RUMC / Karolinska).  Source fields are tried in
-order — the first match wins.
+Two registries — one per task — are exposed by the MCP server. Each
+:class:`~chimera_agent_baseline.tools.base.ToolSpec` lists the fields
+from the per-case ``tools.json`` it returns.
 
-To add a custom tool, create a new ``ToolSpec`` and append it to
-:data:`TOOL_REGISTRY`.
+To add a custom tool, append a new ``ToolSpec`` to the appropriate
+registry below.
 """
 
 from chimera_agent_baseline.tools.base import ToolSpec
 
 # ---------------------------------------------------------------------------
-# Tool definitions
+# Per-patient encounter tools.
+#
+# The agent receives the always-visible patient context (encounter, vitals,
+# PMHx, DRE prose, csPCa pill, age, headline PSA / PI-RADS) up front in the
+# rendered user prompt; the tools below cover the masked / on-demand
+# sections.
 # ---------------------------------------------------------------------------
 
-CLINICAL_INFO = ToolSpec(
-    name="get_clinical_info",
+PSA_TREND = ToolSpec(
+    name="get_psa_trend",
     description=(
-        "Retrieve patient clinical information including demographics, PSA "
-        "levels, and medical history. Simulates a query to an electronic "
-        "health record (EHR) system."
+        "Retrieve the patient's prior PSA measurements as a time series "
+        "(date + value). Reveals PSA velocity / trajectory beyond the "
+        "single headline value already in the prompt."
     ),
-    field_mapping={
-        "case_id": ["case_id"],
-        "source": ["source"],
-        "age": ["age", "age_at_prostatectomy", "MR_age"],
-        "birthdate": ["birthdate", "BIRTH"],
-        "psa": ["pre_operative_PSA", "X_RESULT"],
-        "medical_history": ["Anamnes"],
-        "previous_treatment": ["yT"],
-        "previous_biopsy": ["prev_biopsy"],
-        "referral_date": ["REFERRAL_DATE"],
-    },
+    fields=("psa_trend",),
 )
 
-GLEASON_GRADES = ToolSpec(
-    name="get_gleason_grades",
+LAB_RESULTS = ToolSpec(
+    name="get_lab_results",
     description=(
-        "Retrieve Gleason grading results from computational pathology "
-        "analysis. Returns primary, secondary, and tertiary Gleason "
-        "patterns plus the ISUP grade group. Simulates an AI pathology "
-        "model that grades biopsy or prostatectomy tissue."
+        "Retrieve the full laboratory panel for the patient (PSA, free PSA, "
+        "haematology, renal function, testosterone, alkaline phosphatase, "
+        "LDH, etc.) as a list of {name, val, date, flag}."
     ),
-    field_mapping={
-        "case_id": ["case_id"],
-        "primary_gleason": ["primary_gleason", "GLEASON1"],
-        "secondary_gleason": ["secondary_gleason", "GLEASON2"],
-        "tertiary_gleason": ["tertiary_gleason"],
-        "isup_grade": ["ISUP"],
-        "diagnosis_description": ["DIAG_DESCRIPTION"],
-    },
+    fields=("labs",),
 )
 
-MRI_FINDINGS = ToolSpec(
-    name="get_mri_findings",
+MRI_REPORT = ToolSpec(
+    name="get_mri_report",
     description=(
-        "Retrieve MRI analysis results including PI-RADS score, lesion "
-        "detection, and prostate volume assessment. Simulates an AI "
-        "radiology model analysing prostate MRI."
+        "Retrieve the radiologist's full mpMRI report as free text, plus the "
+        "structured imaging values it contains (PI-RADS, prostate volume, "
+        "PSA density, AI csPCa probability)."
     ),
-    field_mapping={
-        "case_id": ["case_id"],
-        "pirads": ["PIRADS", "Pirads_High"],
-        "lesion_detected": ["Lesion"],
-        "prior_lesion": ["Lesion_anam"],
-        "prostate_volume": ["prostata_vol"],
-        "imaging_date": ["pre-op_image_date", "provdat"],
-    },
+    fields=("imaging_report", "pirads", "prostate_volume", "psa_density", "cspca_pred"),
 )
 
-PATHOLOGY_STAGING = ToolSpec(
-    name="get_pathology_staging",
+PATHOLOGY_REPORT = ToolSpec(
+    name="get_pathology_report",
     description=(
-        "Retrieve pathological staging information (TNM classification). Simulates a pathology staging assessment."
+        "Retrieve the pathologist's full biopsy report as free text, plus "
+        "structured per-timepoint biopsy data (Gleason patterns, ISUP grade "
+        "group, cribriform / intraductal / %GP4 when reported). Returns an "
+        "empty report if the patient has not had a biopsy."
     ),
-    field_mapping={
-        "case_id": ["case_id"],
-        "pt_stage": ["pT_stage", "tkategori_beskrivning"],
-        "n_stage": ["nkategori_beskrivning"],
-        "m_stage": ["mkategori_beskrivning"],
-    },
+    fields=("pathology_report", "biopsies", "prior_biopsy"),
 )
 
-SURGICAL_PATHOLOGY = ToolSpec(
-    name="get_surgical_pathology",
+PREVIOUS_NOTES = ToolSpec(
+    name="get_previous_notes",
     description=(
-        "Retrieve surgical pathology findings from prostatectomy specimen "
-        "analysis: margin status, capsular penetration, seminal vesicle "
-        "invasion, lymphovascular invasion, and lymph node involvement."
+        "Retrieve previous GP / urology consultation notes for this patient, as a list of {date, author, text}."
     ),
-    field_mapping={
-        "case_id": ["case_id"],
-        "positive_lymph_nodes": ["positive_lymph_nodes"],
-        "capsular_penetration": ["capsular_penetration"],
-        "positive_surgical_margins": ["positive_surgical_margins"],
-        "invasion_seminal_vesicles": ["invasion_seminal_vesicles"],
-        "lymphovascular_invasion": ["lymphovascular_invasion"],
-    },
+    fields=("previous_notes",),
 )
 
-FOLLOW_UP = ToolSpec(
-    name="get_follow_up",
+FAMILY_HISTORY = ToolSpec(
+    name="get_family_history",
     description=(
-        "Retrieve patient follow-up data including biochemical recurrence "
-        "(BCR) status, PSA at recurrence, and follow-up timeline. "
-        "Available for post-operative cases."
+        "Ask the patient about their first-degree family history of "
+        "prostate cancer (father / brothers). Returns 'Yes', 'No', or "
+        "'Unknown'. This is anamnesis elicited during the consultation "
+        "rather than information present in the EHR up front, so it must "
+        "be actively requested."
     ),
-    field_mapping={
-        "case_id": ["case_id"],
-        "bcr": ["BCR"],
-        "bcr_psa": ["BCR_PSA"],
-        "bcr_date": ["BCR_date"],
-        "last_follow_up_date": ["last_follow_up_date"],
-        "time_to_event_months": ["time_to_follow-up/BCR"],
-        "surgery_date": ["rarp_date"],
-        "report_date": ["report_date"],
-    },
+    fields=("family_history",),
 )
 
-# ---------------------------------------------------------------------------
-# Registry — add custom tools here
-# ---------------------------------------------------------------------------
 
-TOOL_REGISTRY: list[ToolSpec] = [
-    CLINICAL_INFO,
-    GLEASON_GRADES,
-    MRI_FINDINGS,
-    PATHOLOGY_STAGING,
-    SURGICAL_PATHOLOGY,
-    FOLLOW_UP,
+# Task 1 — biopsy decision. Full per-encounter tool set.
+TASK1_TOOLS: list[ToolSpec] = [
+    PSA_TREND,
+    LAB_RESULTS,
+    MRI_REPORT,
+    PATHOLOGY_REPORT,
+    PREVIOUS_NOTES,
+    FAMILY_HISTORY,
+]
+
+
+# Task 2 — treatment decision. The urologist arrives at the MDT with the
+# lab panel and PSA trend already in hand (in the prompt context up
+# front), so those tools drop out. Pathology returns a richer per-core
+# detail set since treatment choice depends on it.
+PATHOLOGY_REPORT_TREATMENT = ToolSpec(
+    name="get_pathology_report",
+    description=(
+        "Retrieve the full pathology report for the patient's prostate "
+        "biopsy / biopsies. Returns the prose report plus structured "
+        "per-timepoint detail: Gleason patterns, ISUP grade group "
+        "(reported and AI-predicted), cores positive / total, max core %, "
+        "dominant growth pattern, presence of high-risk patterns "
+        "(cribriform / IDC-P), perineural invasion (PNI), lymphovascular "
+        "invasion (LVI), and tumour location."
+    ),
+    fields=(
+        "pathology_report",
+        "biopsies",
+        "bx_isup",
+        "bx_gl_prim",
+        "bx_gl_sec",
+        "bx_gl_tert",
+        "bx_isup_pred",
+        "ct",
+        "cores_positive",
+        "cores_total",
+        "max_core_pct",
+        "growth_pattern",
+        "high_risk_patterns",
+        "pni",
+        "lvi",
+        "tumor_location",
+        "prior_biopsy",
+    ),
+)
+
+
+TASK2_TOOLS: list[ToolSpec] = [
+    MRI_REPORT,
+    PATHOLOGY_REPORT_TREATMENT,
+    PREVIOUS_NOTES,
+    FAMILY_HISTORY,
 ]
