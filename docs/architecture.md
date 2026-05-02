@@ -76,6 +76,15 @@ precomputed-data pattern (e.g. an API call), register them directly in
 `mcp_server.py` with the `@mcp.tool()` decorator (see
 `search_guidelines`).
 
+### What you can change
+
+You're free to **add** tools, change a tool's `description`, or
+expand its `fields`. Don't rename or remove the existing baseline
+tools — `output/schema.py` (locked) maps each rateable
+reasoning-variable to the tool that backs it (e.g. `pirads →
+get_mri_report`), and renaming a tool silently makes those variables
+un-rateable.
+
 ## Action log
 
 The MCP server logs every tool call with `tool`, `args`, `result`,

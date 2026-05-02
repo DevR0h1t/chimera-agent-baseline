@@ -119,10 +119,23 @@ tool→field mapping).
 | `labs` | list | 1 only | `get_lab_results` |
 
 The split between `prompt.json` and `tools.json` reflects what a
-clinician would have at a glance versus what they'd actively pull up:
-participants who change tools just edit `TASK1_TOOLS` / `TASK2_TOOLS`
-in `src/chimera_agent_baseline/tools/definitions.py` to map their tool
-to one or more `tools.json` keys.
+clinician would have at a glance versus what they'd actively pull up.
+The split is *per task*, not per field: labs and PSA history live in
+`tools.json` for Task 1 (the agent has to call `get_lab_results` /
+`get_psa_trend` to see them) but in `prompt.json` for Task 2 (already
+in hand at the MDT). For any single case, each field appears in
+exactly one of the two files.
+
+To **add** a clinical tool, register a new `ToolSpec` in
+`src/chimera_agent_baseline/tools/definitions.py` and append it to
+`TASK1_TOOLS` / `TASK2_TOOLS` — the new tool's `fields` map to one or
+more `tools.json` keys.
+
+Do **not** rename or remove the existing tools. The reasoning-variable
+schema in `output/schema.py` (locked) maps each rateable variable to
+the tool that backs it (e.g. `pirads → get_mri_report`); renaming the
+tool silently makes those variables un-rateable. Editing a tool's
+description or expanding its `fields` is fine.
 
 ### Outputs
 
