@@ -66,7 +66,7 @@ make run
 ### Grand Challenge container
 ```bash
 make gc-build                            # build the GC Docker image
-make gc-run INPUT=outputs/agent_input/task1
+make gc-test INPUT=outputs/agent_input/task1
 make gc-save                             # export image + model tarballs
 ```
 

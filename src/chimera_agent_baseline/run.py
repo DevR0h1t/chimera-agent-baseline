@@ -153,7 +153,7 @@ async def run_agent(cfg: DictConfig) -> None:
     per_case_dir = output_dir / "predictions" / f"task{task_int}"
     per_case_dir.mkdir(parents=True, exist_ok=True)
 
-    predictions: list[dict[str, Any]] = []
+    n_done = 0
     for query in queries:
         case_id = query["case_id"]
         log.info("Processing case %s (task: %s)", case_id, query.get("task", "unknown"))
@@ -202,10 +202,10 @@ async def run_agent(cfg: DictConfig) -> None:
         # Persist incrementally so partial progress survives interruption.
         per_case_path = per_case_dir / f"{case_id}.json"
         per_case_path.write_text(json.dumps(prediction, indent=2))
-        predictions.append(prediction)
+        n_done += 1
         log.info("Case %s done (%d actions) -> %s", case_id, len(action_log), per_case_path)
 
-    log.info("Wrote %d predictions to %s", len(predictions), per_case_dir)
+    log.info("Wrote %d predictions to %s", n_done, per_case_dir)
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config")

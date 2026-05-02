@@ -14,7 +14,8 @@ HumanMessage(prompt)
        ▼
   ┌──────────────┐
   │ form_fill    │  same model + per-case Pydantic schema
-  │ (LLM)        │  validated via PydanticOutputParser, retried up to 3×
+  │ (LLM)        │  validated via PydanticOutputParser; retries on
+  │              │  validation error (agent.form_fill.max_retries)
   └──────┬───────┘
          ▼
        END  →  structured_response + reasoning_trace + action_log

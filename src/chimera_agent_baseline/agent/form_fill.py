@@ -112,7 +112,12 @@ def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
                 )
 
         if structured_response is None:
-            log.error("form_fill: all %d attempts failed for %s — writing partial", max_retries, case_id)
+            log.error(
+                "form_fill: all %d attempts failed for %s — emitting stub; "
+                "the run-level schema validator will then abort the run",
+                max_retries,
+                case_id,
+            )
             structured_response = {
                 "case_id": case_id,
                 "task": "risk_stratification" if task == 2 else "mri_diagnostic",
