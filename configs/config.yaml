@@ -49,6 +49,9 @@ agent:
   # Optional case-subset filters. ``pids`` wins over ``limit`` when both set.
   pids: null
   limit: null
+  # Form-fill node — terminal step that emits the structured submission.
+  form_fill:
+    max_retries: 3               # validation retries before raising
 
 # --- Logging ---
 logging:

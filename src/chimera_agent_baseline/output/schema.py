@@ -12,7 +12,7 @@ the per-task Pydantic shape: a decision, an overall confidence, a
 focused decision summary, and a per-variable rating + reasoning.
 
 Per-task variable→tool mapping drives a *dynamic* schema at runtime:
-only variables that are always-visible in the prompt OR backed by a
+only variables that are present in the prompt context OR backed by a
 tool the agent actually called appear as required fields for that case.
 The validated payload is then normalised back to the full static shape
 with ``Not used`` / empty reasoning for omitted variables, so downstream
@@ -69,9 +69,9 @@ class VariableReasoning(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Per-task variable -> tool mapping. ``None`` means always-visible (in the
-# prompt context) and so always rateable, regardless of which tools were
-# called. A string means "this tool must have been called for the variable
+# Per-task variable -> tool mapping. ``None`` means the variable is in
+# the prompt context and so always rateable, regardless of which tools
+# were called. A string means "this tool must have been called for the variable
 # to be rateable".
 # ---------------------------------------------------------------------------
 
@@ -134,14 +134,6 @@ class _BaseOutput(BaseModel):
 class Task1Output(_BaseOutput):
     task: Literal["mri_diagnostic"] = "mri_diagnostic"
     biopsy_recommendation: bool = Field(description="True = recommend biopsy, False = defer / no biopsy.")
-    cspca_probability_self: float = Field(
-        ge=0,
-        le=1,
-        description=(
-            "Your own estimate (0-1) of the probability this patient has "
-            "clinically significant prostate cancer (ISUP >= 2)."
-        ),
-    )
     repeat_test: str | None = Field(
         default=None,
         description=(
@@ -179,7 +171,7 @@ TASK_OUTPUT_MODELS: dict[int, type[_BaseOutput]] = {
 def eligible_variables(task: int, called_tools: set[str]) -> list[str]:
     """Variables eligible for rating in the structured output.
 
-    A variable is eligible if its required tool is None (always-visible) or
+    A variable is eligible if its required tool is None (in the prompt) or
     in ``called_tools`` (the agent actually invoked it during the ReAct
     loop). The action log surfaces tool names like ``get_mri_report``.
     """

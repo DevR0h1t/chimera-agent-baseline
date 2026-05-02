@@ -26,10 +26,13 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from omegaconf import DictConfig
 
+from pydantic import ValidationError
+
 from chimera_agent_baseline.agent.graph import create_graph
 from chimera_agent_baseline.agent.prompts import build_system_prompt
 from chimera_agent_baseline.case_loader import load_cases
 from chimera_agent_baseline.models import load_model
+from chimera_agent_baseline.output.schema import TASK_OUTPUT_MODELS
 from chimera_agent_baseline.rag import start_embedding_service
 from chimera_agent_baseline.utils import setup_logging
 
@@ -138,7 +141,13 @@ async def run_agent(cfg: DictConfig) -> None:
 
     model = load_model(cfg)
     system_prompt = build_system_prompt()
-    graph = create_graph(tools, model, system_prompt, step_timeout=cfg.agent.step_timeout)
+    graph = create_graph(
+        tools,
+        model,
+        system_prompt,
+        step_timeout=cfg.agent.step_timeout,
+        form_fill_max_retries=cfg.agent.form_fill.max_retries,
+    )
 
     output_dir = Path(cfg.paths.output_dir)
     per_case_dir = output_dir / "predictions" / f"task{task_int}"
@@ -160,13 +169,34 @@ async def run_agent(cfg: DictConfig) -> None:
         }
         result = await graph.ainvoke(initial_state, {"recursion_limit": cfg.agent.max_iterations})
 
+        # Fail-early schema check: the structured part of the prediction
+        # must validate against Task1Output / Task2Output before we move
+        # on. Form-fill already retries internally; if we still got here
+        # with an invalid payload, something is wrong and partial outputs
+        # would just mask it.
+        structured = result.get("structured_response") or {}
+        warnings = result.get("form_fill_warnings", [])
+        try:
+            TASK_OUTPUT_MODELS[task_int].model_validate(structured)
+        except ValidationError as exc:
+            log.error(
+                "Output schema validation failed for case %s. form_fill_warnings=%s",
+                case_id,
+                warnings,
+            )
+            raise RuntimeError(
+                f"Case {case_id}: structured output does not validate against "
+                f"{TASK_OUTPUT_MODELS[task_int].__name__}. "
+                f"form_fill_warnings={warnings}\n{exc}"
+            ) from exc
+
         action_log = _action_log_from_messages(result["messages"])
         prediction = {
-            **(result.get("structured_response") or {}),
+            **structured,
             "reasoning_trace": _final_assistant_text(result["messages"]),
             "thinking_trace": _thinking_trace(result["messages"]),
             "action_log": action_log,
-            "form_fill_warnings": result.get("form_fill_warnings", []),
+            "form_fill_warnings": warnings,
         }
 
         # Persist incrementally so partial progress survives interruption.
@@ -175,10 +205,7 @@ async def run_agent(cfg: DictConfig) -> None:
         predictions.append(prediction)
         log.info("Case %s done (%d actions) -> %s", case_id, len(action_log), per_case_path)
 
-    # Aggregate file (used by the GC eval pipeline that reads a single JSON).
-    output_file = output_dir / "predictions.json"
-    output_file.write_text(json.dumps(predictions, indent=2))
-    log.info("Wrote %d predictions to %s (and per-case files in %s)", len(predictions), output_file, per_case_dir)
+    log.info("Wrote %d predictions to %s", len(predictions), per_case_dir)
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config")

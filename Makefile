@@ -10,7 +10,7 @@
 #
 # Docker (Grand Challenge):
 #   make gc-build                   - build the GC image
-#   make gc-run INPUT=<dir>         - run the image on every case in <dir>
+#   make gc-test INPUT=<dir>        - run the image on every case in <dir>
 #   make gc-save                    - export image + model tarballs for upload
 #
 # Maintainer-only cluster targets live in Makefile.cluster (auto-included
@@ -24,7 +24,7 @@ PROJECT_SLUG    ?= chimera_agent_baseline
 GC_IMAGE_TAG    ?= chimera-agent-baseline
 RUN_ARGS        ?=
 
-.PHONY: help install process-guidelines run run-all test lint format lock gc-build gc-run gc-run-cpu gc-save clean doctor
+.PHONY: help install process-guidelines run run-all test lint format lock gc-build gc-test gc-save clean doctor
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -74,7 +74,7 @@ gc-build: ## Build the GC Docker image
 
 INPUT ?= outputs/agent_input/task1
 
-gc-run: gc-build ## Run the agent image against INPUT=<dir>, processing each case sequentially
+gc-test: gc-build ## Run the agent image against INPUT=<dir>, processing each case sequentially
 	@mkdir -p test/output && chmod 777 test/output
 	@rm -rf test/output/*
 	docker run --rm \
@@ -87,16 +87,6 @@ gc-run: gc-build ## Run the agent image against INPUT=<dir>, processing each cas
 	@echo ""
 	@echo "Output files:"
 	@ls -la test/output/
-
-gc-run-cpu: gc-build ## Same as gc-run but without --gpus (smoke test only)
-	@mkdir -p test/output && chmod 777 test/output
-	@rm -rf test/output/*
-	docker run --rm \
-		--network none \
-		--volume $(CURDIR)/$(INPUT):/input:ro \
-		--volume $(CURDIR)/test/output:/output \
-		--volume $(CURDIR)/model:/opt/ml/model:ro \
-		$(GC_IMAGE_TAG)
 
 gc-save: gc-build ## Export GC image + model as tarballs for upload
 	docker save $(GC_IMAGE_TAG) | gzip -c > $(GC_IMAGE_TAG).tar.gz

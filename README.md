@@ -28,6 +28,15 @@ python -c "from huggingface_hub import snapshot_download; snapshot_download('goo
 make process-guidelines    # builds resources/guidelines_db (~1.2 GB)
 ```
 
+Get the per-case agent inputs (`prompt.json` + `tools.json` per
+patient, organised by task):
+
+```bash
+# TODO: replace with the actual download once published.
+# Expected to extract into outputs/agent_input/task1/ and
+# outputs/agent_input/task2/, each with one PT-XXXX subdirectory per case.
+```
+
 Run the agent (NVIDIA GPU with ≥16 GB VRAM):
 
 ```bash
@@ -37,8 +46,7 @@ make run RUN_ARGS="agent.tool_registry=task2 \
 make run RUN_ARGS="agent.limit=5"                            # 5 cases
 ```
 
-Per-case predictions land in `test/output/predictions/task<N>/<pid>.json`;
-the aggregate is `test/output/predictions.json`.
+Per-case predictions land in `test/output/predictions/task<N>/<pid>.json`.
 
 ## Layout
 
@@ -57,8 +65,112 @@ To test in the GC Docker container:
 ```bash
 make gc-build
 make gc-test                                                  # task 1
-make gc-test GC_INPUT_DIR=outputs/agent_input/task2           # task 2
+make gc-test INPUT=outputs/agent_input/task2                  # task 2
 ```
+
+## Per-case I/O
+
+Each case is a directory under `/input` (read-only) containing two files
+the harness already knows how to read. You write one JSON per case to
+`/output/predictions/task<N>/<case_id>.json`, mirroring the input tree.
+
+```
+/input/<case_id>/prompt.json   # patient context rendered into the agent prompt
+/input/<case_id>/tools.json    # served by the MCP server through tool calls
+/output/predictions/task<N>/<case_id>.json   # per-case prediction (Task1Output / Task2Output)
+```
+
+### Inputs
+
+`prompt.json` — patient context the agent always sees (no tool call
+needed). Same shape both tasks; task-2 additionally surfaces `labs` and
+`psa_trend` here, since the urologist arrives at the MDT with them:
+
+| Key | Type | Tasks | Notes |
+|---|---|---|---|
+| `case_id` | str | 1, 2 | matches the directory name |
+| `task` | str | 1, 2 | `mri_diagnostic` (1) or `risk_stratification` (2) |
+| `query` | str | 1, 2 | one-sentence ask |
+| `encounter` | object | 1, 2 | `department`, `date`, `referrer`, `type` |
+| `current_psa` | object | 1, 2 | `value` (float, ng/mL), `date` |
+| `patient` | object | 1, 2 | `age`, `vitals`, `allergies`, `medication`, `pmhx`, `social`, `lifestyle` |
+| `note_sections` | list | 1, 2 | `[{s: "Chief complaint", t: "..."}, ...]` |
+| `recent_other` | list[str] | 1, 2 | recent unrelated appointments |
+| `admin` | str | 1, 2 | free-text admin note |
+| `labs` | list | 2 only | `[{name, value, unit, ref, date}, ...]` |
+| `psa_trend` | list | 2 only | `[{date, value}, ...]` |
+
+`tools.json` — payloads the MCP server returns when the agent calls a
+tool. The agent only sees these fields if it actually invokes the
+matching tool (see [docs/architecture.md](docs/architecture.md) for the
+tool→field mapping).
+
+| Key | Type | Tasks | Served by |
+|---|---|---|---|
+| `case_id` | str | 1, 2 | echoed by every tool |
+| `imaging_report` | str | 1, 2 | `get_mri_report` |
+| `pirads`, `prostate_volume`, `psa_density`, `cspca_pred` | str / float | 1, 2 | `get_mri_report` |
+| `pathology_report` | str | 1, 2 | `get_pathology_report` |
+| `biopsies`, `prior_biopsy` | list / str | 1, 2 | `get_pathology_report` |
+| `bx_gl_prim`, `bx_gl_sec`, `bx_gl_tert`, `bx_isup`, `bx_isup_pred`, `cores_positive`, `cores_total`, `max_core_pct`, `lvi`, `pni`, `growth_pattern`, `high_risk_patterns`, `tumor_location`, `ct` | mixed | 2 only | `get_pathology_report` (richer task-2 panel) |
+| `previous_notes` | list | 1, 2 | `get_previous_notes` |
+| `family_history` | str | 1, 2 | `get_family_history` |
+| `psa_trend` | list | 1 only | `get_psa_trend` |
+| `labs` | list | 1 only | `get_lab_results` |
+
+The split between `prompt.json` and `tools.json` reflects what a
+clinician would have at a glance versus what they'd actively pull up:
+participants who change tools just edit `TASK1_TOOLS` / `TASK2_TOOLS`
+in `src/chimera_agent_baseline/tools/definitions.py` to map their tool
+to one or more `tools.json` keys.
+
+### Outputs
+
+The structured submission contract is the Pydantic models in
+`src/chimera_agent_baseline/output/schema.py` (`Task1Output`,
+`Task2Output`). Outputs that don't validate are rejected.
+
+```jsonc
+// /output/predictions/task1/PT-XXXX.json
+{
+  "case_id": "PT-XXXX",
+  "task": "mri_diagnostic",
+  "biopsy_recommendation": true,           // bool
+  "repeat_test": null,                     // str | null
+  "confidence": "Borderline",              // Clear | Borderline | Uncertain
+  "decision_summary": "...",               // ≥40 chars, names 2-4 driving factors
+  "variable_ratings": {                    // one per TASK1_VARIABLES key
+    "psa": {"rating": "Important", "reasoning": "..."},
+    "pirads": {"rating": "Decisive", "reasoning": "..."}
+    // ...
+  },
+  "reasoning_trace": "...",                // last assistant message
+  "thinking_trace": [...],                 // per-turn reasoning_content (Qwen3, o1, ...)
+  "action_log": [...],                     // every tool call (faithfulness eval)
+  "form_fill_warnings": []
+}
+```
+
+Task-2 replaces `biopsy_recommendation` / `repeat_test` with a single
+`treatment_recommendation` (`active_surveillance` |
+`radical_prostatectomy` | `radiotherapy` | `focal_therapy` |
+`hormonal_therapy` | `watchful_waiting`) and uses the task-2 variable
+set.
+
+### Docker invocation
+
+The Grand Challenge container reads `/input` and writes `/output`:
+
+```bash
+docker run --rm --gpus all \
+    -v $PWD/outputs/agent_input/task1:/input:ro \
+    -v $PWD/test/output:/output \
+    chimera-agent-baseline
+```
+
+`make gc-test` is exactly this with the housekeeping (cleans
+`test/output/`, sets perms, tags the image). The `:ro` on `/input`
+matches the GC platform — your container must not write to it.
 
 ## Documentation
 
@@ -82,8 +194,14 @@ make gc-test GC_INPUT_DIR=outputs/agent_input/task2           # task 2
 | Tune the form-fill prompt / retry | `src/chimera_agent_baseline/agent/form_fill.py` |
 | Rebuild the RAG corpus | `scripts/process_guidelines.py` |
 
-The structured submission contract lives in
-`src/chimera_agent_baseline/output/schema.py`. Submissions whose final
-output does not validate against `Task1Output` / `Task2Output` are
-rejected. Swap models, tools, prompts, and orchestration freely — keep
-the shape.
+## What NOT to change
+
+Two pieces are part of the challenge contract — submissions that
+violate either are rejected. Everything else (system prompt, tools,
+models, agent graph, form-fill node, configs, even the entry-point if
+you want) is fair game.
+
+| File | Why it's locked |
+|---|---|
+| `src/chimera_agent_baseline/output/schema.py` | The Pydantic submission shape. The final JSON must validate against `Task1Output` / `Task2Output`. |
+| `src/chimera_agent_baseline/mcp_server.py` (action-log layer) | Every tool call is logged with `tool`, `args`, `result`, `timestamp` — used for faithfulness evaluation. Add tools, swap registries, but keep the log intact. |

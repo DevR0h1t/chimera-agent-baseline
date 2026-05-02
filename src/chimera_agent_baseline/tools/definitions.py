@@ -13,10 +13,10 @@ from chimera_agent_baseline.tools.base import ToolSpec
 # ---------------------------------------------------------------------------
 # Per-patient encounter tools.
 #
-# The agent receives the always-visible patient context (encounter, vitals,
-# PMHx, DRE prose, csPCa pill, age, headline PSA / PI-RADS) up front in the
-# rendered user prompt; the tools below cover the masked / on-demand
-# sections.
+# The patient context the agent always sees (encounter, vitals, PMHx, DRE
+# prose, age, headline PSA / PI-RADS, csPCa probability) is rendered into
+# the user prompt up front; the tools below cover the data the agent has
+# to actively pull up.
 # ---------------------------------------------------------------------------
 
 PSA_TREND = ToolSpec(

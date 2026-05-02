@@ -35,7 +35,8 @@ The server runs as a stdio subprocess and is framework-agnostic.
 
 **Source**: `src/chimera_agent_baseline/mcp_server.py`.
 
-Two registries, selected at startup via `--tool-registry task1|task2`:
+Two registries, selected via the Hydra config key
+`agent.tool_registry=task1|task2`:
 
 | Tool | Task 1 | Task 2 | Returns |
 |---|---|---|---|
@@ -46,11 +47,13 @@ Two registries, selected at startup via `--tool-registry task1|task2`:
 | `get_previous_notes` | ✓ | ✓ | Prior GP / urology notes |
 | `get_family_history` | ✓ | ✓ | First-degree PCa history |
 | `search_guidelines` | ✓ | ✓ | Semantic search over EAU corpus |
-| `get_action_log` | runner-only | runner-only | The append-only action log |
 
-For Task 2, lab panel and PSA trend are surfaced in the prompt context
-up front (the urologist arrives at the MDT with them), so the matching
-tools are dropped from the registry.
+The action log isn't a registered MCP tool — the runner reconstructs
+it from the message history after each case (see
+[Action log](#action-log) below).
+
+For Task 2, the lab panel and PSA trend are surfaced in the prompt
+context up front, so the matching tools are dropped from the registry.
 
 ### Adding a custom tool
 
@@ -101,7 +104,7 @@ Each case writes
 
 | Field | Source | Purpose |
 |---|---|---|
-| Decision fields (`biopsy_recommendation`, `cspca_probability_self`, `treatment_recommendation`, …) | form-fill node | Scored numerically |
+| Decision fields (`biopsy_recommendation`, `treatment_recommendation`, `repeat_test`) | form-fill node | The decision to be evaluated |
 | `confidence`, `decision_summary`, `variable_ratings` | form-fill node | Reasoning capture |
 | `reasoning_trace` | last assistant message | Qualitative review |
 | `thinking_trace[]` | `additional_kwargs.reasoning_content` | Captured for models that emit chain-of-thought separately (Qwen3+, OpenAI o1) |

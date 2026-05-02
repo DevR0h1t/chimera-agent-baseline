@@ -86,7 +86,6 @@ def test_graph_runs_through_form_fill():
         "case_id": "PT-T1",
         "task": "mri_diagnostic",
         "biopsy_recommendation": True,
-        "cspca_probability_self": 0.78,
         "repeat_test": None,
         "confidence": "Clear",
         "decision_summary": "PI-RADS 5 plus PSAD 0.68 is decisive — biopsy required.",

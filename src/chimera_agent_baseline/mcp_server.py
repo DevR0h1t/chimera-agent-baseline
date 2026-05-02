@@ -8,6 +8,15 @@ Usage::
     python -m chimera_agent_baseline.mcp_server \\
         --data-dir outputs/agent_input/task1 --resource-dir resources \\
         --tool-registry task1
+
+.. note::
+
+    The action-log layer — every tool call is recorded with ``tool``,
+    ``args``, ``result``, and ``timestamp`` — is part of the challenge
+    contract and powers faithfulness evaluation. Add new tools, edit
+    existing ones, swap the registry; just keep the action log
+    intact. Submissions whose action log has been disabled or
+    tampered with will be rejected.
 """
 
 import argparse

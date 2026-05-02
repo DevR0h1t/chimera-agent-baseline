@@ -64,6 +64,7 @@ def create_graph(
     model: BaseChatModel,
     system_prompt: str,
     step_timeout: int = 120,
+    form_fill_max_retries: int = 3,
 ):
     """Build and compile the ReAct + form-fill graph.
 
@@ -86,7 +87,7 @@ def create_graph(
     builder = StateGraph(AgentState)
     builder.add_node("agent", agent)
     builder.add_node("tools", ToolNode(tools))
-    builder.add_node("form_fill", make_form_fill_node(model))
+    builder.add_node("form_fill", make_form_fill_node(model, max_retries=form_fill_max_retries))
     builder.add_edge(START, "agent")
     builder.add_conditional_edges("agent", _route_after_agent, {"tools": "tools", "form_fill": "form_fill"})
     builder.add_edge("tools", "agent")

@@ -48,7 +48,6 @@ notebooks/.ipynb_checkpoints/
 
 # OS
 .DS_Store
-docs/internal/
 
 # Maintainer-only cluster assets (paired with Makefile.cluster).
 _cluster/

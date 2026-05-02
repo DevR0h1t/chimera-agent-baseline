@@ -17,9 +17,9 @@ _QUIET_LOGGERS = [
 def setup_logging(level: str = "INFO") -> None:
     """Configure logging for the application.
 
-    Call this once from each entry point (``run.py``, ``inference.py``,
-    ``sanity_check.py``).  The MCP server subprocess has its own
-    ``setup_logging`` call since it runs in a separate process.
+    Call this once from each entry point (``run.py``, ``inference.py``).
+    The MCP server subprocess has its own ``setup_logging`` call since
+    it runs in a separate process.
 
     Args:
         level: Root log level (DEBUG, INFO, WARNING, ERROR). Noisy

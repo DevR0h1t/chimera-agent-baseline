@@ -2,15 +2,14 @@
 # =============================================================================
 # Experiment overlay — Qwen 3.6 35B-A3B served via llama.cpp's OpenAI server.
 #
-# Used to verify the orchestration is provider-neutral. Spin up the server
-# on the dev box with `LLAMA_CTX=16384 ~/.local/bin/llama-start`, then:
+# Demonstrates that the orchestration is provider-neutral: any
+# OpenAI-compatible HTTP endpoint can stand in for the in-process vLLM
+# backend. Start a llama.cpp server somewhere reachable, then:
 #
-#     python -m chimera_agent_baseline.run +experiment=qwen_local \
-#       paths.input_dir=outputs/agent_input/task1 \
-#       agent.tool_registry=forms agent.limit=10
+#     make run RUN_ARGS="+experiment=qwen_local agent.limit=10"
 #
-# Bearer token is read from $LLAMA_API_KEY (set by llama-start when the
-# local-stack .env defines it). Falls back to "no-key" when unset.
+# Bearer token is read from $LLAMA_API_KEY (any non-empty string for
+# llama.cpp). Falls back to "no-key" when unset.
 #
 # Thinking traces:
 #   We KEEP Qwen's <think> reasoning enabled. llama.cpp emits the chain of

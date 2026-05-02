@@ -12,10 +12,11 @@ offline tool-call parser, for instance, sometimes does not emit a tool
 call when there is only one forced schema-tool). Prompt-and-parse is
 provider-neutral: any LangChain ``BaseChatModel`` works.
 
-Participants generally should not modify this module — the structured
-output schema is part of the challenge contract and submissions whose
-final output does not validate are rejected. Tweaking the prompt /
-retry strategy here is fine; changing the response shape is not.
+This module is fair game to edit — change the skeleton, swap the
+parser, tune the retry strategy, replace the whole node. The only
+constraint is that the final JSON must validate against
+:class:`Task1Output` / :class:`Task2Output`; submissions whose final
+output does not validate are rejected.
 """
 
 from __future__ import annotations
@@ -46,11 +47,13 @@ _SYSTEM_PROMPT = (
     "markdown fences, no commentary before or after the JSON."
 )
 
-_MAX_ATTEMPTS = 3
+def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
+    """Return a LangGraph node closure that captures the unbound *model*.
 
-
-def make_form_fill_node(model: BaseChatModel):
-    """Return a LangGraph node closure that captures the unbound *model*."""
+    *max_retries* is the number of validation attempts before the node
+    falls back to a stub structured response (the run-level validator
+    in :mod:`chimera_agent_baseline.run` will then raise on the stub).
+    """
 
     def form_fill(state: dict[str, Any]) -> dict[str, Any]:
         messages = state["messages"]
@@ -83,7 +86,7 @@ def make_form_fill_node(model: BaseChatModel):
         structured_response: dict[str, Any] | None = None
         retry_hint: str | None = None
 
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
+        for attempt in range(1, max_retries + 1):
             user_content = base_user if not retry_hint else f"{base_user}\n\n{retry_hint}"
             try:
                 response = model.invoke(
@@ -99,7 +102,7 @@ def make_form_fill_node(model: BaseChatModel):
             except Exception as exc:  # noqa: BLE001 — must not crash the graph
                 warnings.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
                 log.warning("form_fill parse failed (attempt %d) for %s: %s", attempt, case_id, exc)
-                if attempt == _MAX_ATTEMPTS:
+                if attempt == max_retries:
                     break
                 retry_hint = (
                     "Your previous attempt did not validate. The validation "
@@ -109,7 +112,7 @@ def make_form_fill_node(model: BaseChatModel):
                 )
 
         if structured_response is None:
-            log.error("form_fill: all %d attempts failed for %s — writing partial", _MAX_ATTEMPTS, case_id)
+            log.error("form_fill: all %d attempts failed for %s — writing partial", max_retries, case_id)
             structured_response = {
                 "case_id": case_id,
                 "task": "risk_stratification" if task == 2 else "mri_diagnostic",
@@ -176,7 +179,6 @@ def _build_skeleton_instructions(task: int, eligible: list[str]) -> str:
         task_const = '"mri_diagnostic"'
         decision_lines = [
             '  "biopsy_recommendation": <true | false>,',
-            '  "cspca_probability_self": <number 0-1, your own estimate>,',
             '  "repeat_test": <string with extra test you would request, or null>,',
         ]
     else:

@@ -12,16 +12,17 @@ Participants design agent-level decision policies that leverage pre-built, modal
 
 ### Task 1: MRI-Only Diagnostic Decision
 
-Estimate the probability of clinically significant prostate cancer (csPCa) and recommend whether biopsy is warranted, using only multiparametric MRI features and basic clinical variables (age, PSA, PSA density, prostate volume).
+Decide whether biopsy is warranted from multiparametric MRI features and basic clinical variables (age, PSA, PSA density, prostate volume), and explain which evidence drove the decision.
 
 - **Input:** Precomputed MRI features (`.h5`) + clinical variables (`.csv`)
-- **Output:** JSON (~5 KB) containing:
-  1. **csPCa probability** — continuous score (evaluated via AUROC)
-  2. **Biopsy recommendation** — binary yes/no
-  3. **Reasoning trace** — structured explanation referencing PI-RADS scores, lesion characteristics, zonal anatomy, and capsular contact
+- **Output:** JSON containing:
+  1. **Biopsy recommendation** — binary yes/no
+  2. **Repeat test** — free-text describing any additional test you would request first, or null
+  3. **Variable ratings** — per-variable Decisive / Important / Noted / Not used + reasoning
+  4. **Decision summary + confidence**
 - **Ground truth:** Histopathology-confirmed csPCa (ISUP Grade Group >= 2); negatives confirmed by longitudinal PSA follow-up
-- **Metric:** AUROC
 - **Provided tool:** MRI prostate zone segmentation
+- **Note:** an earlier draft of the spec asked for a continuous csPCa probability evaluated via AUROC. That has been dropped — the agent's decision is binary. The MRI tool's `cspca_pred` (a model-derived probability) is still surfaced as evidence the agent can weigh and rate.
 
 ### Task 2: MRI + Biopsy Risk Stratification
 
