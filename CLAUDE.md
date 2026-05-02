@@ -46,10 +46,11 @@ src/chimera_agent_baseline/     Python package — distributed via pip install
 configs/
   config.yaml                   Base config (Hydra entrypoint) — all defaults
   experiment/                   Experiment override configs (+experiment=name)
-  nodes/                        SLURM node tier configs (high, medium, low)
+templates/prompts/              Jinja prompt templates the agent renders at runtime
 tests/                          Tests
-scripts/slurm/                  SLURM job scripts (run, dev)
-scripts/docker/                 Project Dockerfile
+scripts/                        Helper scripts (process_guidelines.py, etc.)
+Dockerfile                      Grand Challenge container build
+inference.py                    GC container entrypoint
 ```
 
 ## Workflows
