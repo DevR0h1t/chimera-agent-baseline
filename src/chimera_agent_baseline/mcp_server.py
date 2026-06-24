@@ -6,17 +6,17 @@ works — the runner uses :mod:`langchain_mcp_adapters`).
 Usage::
 
     python -m chimera_agent_baseline.mcp_server \\
-        --data-dir outputs/agent_input/task1 --resource-dir resources \\
+        --data-dir data/task1/agent_input --resource-dir resources \\
         --tool-registry task1
 
 .. note::
 
-    The action-log layer — every tool call is recorded with ``tool``,
-    ``args``, ``result``, and ``timestamp`` — is part of the challenge
-    contract and powers faithfulness evaluation. Add new tools, edit
-    existing ones, swap the registry; just keep the action log
-    intact. Submissions whose action log has been disabled or
-    tampered with will be rejected.
+    Tools are not mandatory: the participant container is a black box,
+    so tool use cannot be enforced or audited. Only the final structured
+    output (``Task1Output`` / ``Task2Output`` / ``Task3Output``) is
+    evaluated. The tools mirror the masked "Extended EHR view" sections
+    of the urologist forms — add new ones, edit existing ones, or swap
+    the registry freely.
 """
 
 import argparse

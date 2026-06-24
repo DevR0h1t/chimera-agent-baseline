@@ -6,7 +6,7 @@
 #
 #   make run                                                 # uses this file
 #   make run RUN_ARGS="agent.tool_registry=task2 \
-#       paths.input_dir=outputs/agent_input/task2"           # task 2
+#       paths.input_dir=data/task2/agent_input"              # task 2
 #   make run RUN_ARGS="+experiment=qwen_local"               # swap model
 #   make run RUN_ARGS="agent.limit=5"                        # first 5 cases
 # =============================================================================
@@ -17,7 +17,7 @@ defaults:
 # --- Paths ---
 # In the Grand Challenge container these are overridden to /input, /output, etc.
 paths:
-  input_dir: outputs/agent_input/task1
+  input_dir: data/task1/agent_input
   output_dir: test/output
   resource_dir: resources
   model_dir: model

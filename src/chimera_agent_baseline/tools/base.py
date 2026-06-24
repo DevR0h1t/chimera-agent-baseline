@@ -1,12 +1,18 @@
 """Base utilities for precomputed tool data.
 
-Provides :class:`CaseDataStore` for loading per-case ``tools.json``
+Provides :class:`CaseDataStore` for loading per-case ``clinical.json``
 files and :class:`ToolSpec` for declaratively defining new tools.
+
+``clinical.json`` mirrors the masked "Extended EHR view" sections of the
+urologist forms (radiology / MRI report, pathology report, previous
+notes, laboratory results, PSA history, family-history anamnesis). Each
+tool returns one such section's value directly, so the agent must take an
+action to reveal it — exactly as the urologist expanded a masked section.
 
 Adding a custom tool
 --------------------
 1. Define a :class:`ToolSpec` with a name, description, and the field
-   names from ``tools.json`` it should return::
+   names from ``clinical.json`` it should return::
 
        MY_TOOL = ToolSpec(
            name="get_my_data",
@@ -36,7 +42,7 @@ class ToolSpec:
         name: Tool function name (used by MCP for discovery).
         description: Human-readable description (shown to the LLM).
         fields: Names of the per-case fields this tool returns. Each
-            name must exist as a top-level key in ``tools.json`` for
+            name must exist as a top-level key in ``clinical.json`` for
             cases where the tool has data; missing keys are silently
             omitted from the returned payload. ``case_id`` is always
             included automatically.
@@ -47,15 +53,19 @@ class ToolSpec:
     fields: tuple[str, ...]
 
 
+#: Per-case clinical data filename.
+CASE_DATA_FILENAME = "clinical.json"
+
+
 class CaseDataStore:
-    """Loads per-patient ``tools.json`` files and indexes cases by ``case_id``.
+    """Loads per-patient ``clinical.json`` files and indexes cases by ``case_id``.
 
     Expects the canonical layout::
 
         data_dir/
-          PT-<id>/
-            tools.json
-            prompt.json   # ignored — read by the agent runner, not the MCP server
+          <case-dir>/            # e.g. PT-<id> (task 1) or T2-<n> (task 2)
+            clinical.json
+            prompt.json          # ignored — read by the agent runner, not the MCP server
 
     """
 
@@ -68,18 +78,17 @@ class CaseDataStore:
             log.warning("Data dir %s is not a directory", data_dir)
             return
 
-        pair_subdirs = sorted(
-            p for p in data_dir.iterdir() if p.is_dir() and p.name.startswith("PT-") and (p / "tools.json").exists()
-        )
-        if not pair_subdirs:
-            log.warning("No PT-*/tools.json subdirectories found in %s", data_dir)
+        case_subdirs = sorted(p for p in data_dir.iterdir() if p.is_dir() and (p / CASE_DATA_FILENAME).exists())
+        if not case_subdirs:
+            log.warning("No */%s subdirectories found in %s", CASE_DATA_FILENAME, data_dir)
             return
 
-        for sub in pair_subdirs:
+        for sub in case_subdirs:
+            case_file = sub / CASE_DATA_FILENAME
             try:
-                case = json.loads((sub / "tools.json").read_text())
+                case = json.loads(case_file.read_text())
             except json.JSONDecodeError:
-                log.warning("Skipping %s/tools.json: invalid JSON", sub)
+                log.warning("Skipping %s: invalid JSON", case_file)
                 continue
             case_id = case.get("case_id") or sub.name
             self._cases[case_id] = case

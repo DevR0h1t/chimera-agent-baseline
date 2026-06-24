@@ -44,10 +44,10 @@ run: ## Run the agent locally (use RUN_ARGS for Hydra overrides)
 
 run-all: ## Run task 1 then task 2 sequentially
 	python -m chimera_agent_baseline.run \
-		paths.input_dir=outputs/agent_input/task1 \
+		paths.input_dir=data/task1/agent_input \
 		agent.tool_registry=task1 $(RUN_ARGS)
 	python -m chimera_agent_baseline.run \
-		paths.input_dir=outputs/agent_input/task2 \
+		paths.input_dir=data/task2/agent_input \
 		agent.tool_registry=task2 $(RUN_ARGS)
 
 test: ## Run tests
@@ -72,7 +72,7 @@ lock: ## Pin dependencies to requirements.lock
 gc-build: ## Build the GC Docker image
 	docker build --platform=linux/amd64 --tag $(GC_IMAGE_TAG) .
 
-INPUT ?= outputs/agent_input/task1
+INPUT ?= data/task1/agent_input
 
 gc-test: gc-build ## Run the agent image against INPUT=<dir>, processing each case sequentially
 	@mkdir -p test/output && chmod 777 test/output

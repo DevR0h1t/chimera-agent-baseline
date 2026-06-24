@@ -8,7 +8,7 @@ Usage::
 
     make run                                            # task 1, defaults
     make run RUN_ARGS="agent.tool_registry=task2 \\
-        paths.input_dir=outputs/agent_input/task2"      # task 2
+        paths.input_dir=data/task2/agent_input"          # task 2
     make run RUN_ARGS="+experiment=qwen_local"          # swap to Qwen
     make run RUN_ARGS="agent.limit=5"                   # first 5 cases
 """
@@ -22,10 +22,9 @@ from typing import Any
 
 import hydra
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from omegaconf import DictConfig
-
 from pydantic import ValidationError
 
 from chimera_agent_baseline.agent.graph import create_graph
@@ -60,49 +59,6 @@ def _filter_queries(queries: list[dict], cfg: DictConfig) -> list[dict]:
         log.info("Limiting to first %d cases", len(out))
         return out
     return queries
-
-
-def _action_log_from_messages(messages: list) -> list[dict[str, Any]]:
-    """Reconstruct a per-case action log from the LangGraph message history."""
-    entries: list[dict[str, Any]] = []
-    pending: dict[str, dict[str, Any]] = {}
-    for m in messages:
-        if isinstance(m, AIMessage) and m.tool_calls:
-            for tc in m.tool_calls:
-                pending[tc["id"]] = {"tool": tc["name"], "args": tc.get("args", {})}
-        elif isinstance(m, ToolMessage):
-            entry = pending.pop(getattr(m, "tool_call_id", ""), None) or {"tool": m.name, "args": {}}
-            content = m.content if isinstance(m.content, str) else str(m.content)
-            try:
-                entry["result"] = json.loads(content)
-            except (json.JSONDecodeError, TypeError):
-                entry["result"] = content
-            entries.append(entry)
-    return entries
-
-
-def _final_assistant_text(messages: list) -> str:
-    for m in reversed(messages):
-        if isinstance(m, AIMessage) and m.content and not getattr(m, "tool_calls", None):
-            return m.content if isinstance(m.content, str) else json.dumps(m.content)
-    return ""
-
-
-def _thinking_trace(messages: list) -> list[dict[str, str]]:
-    """Capture every assistant turn's ``reasoning_content`` if present.
-
-    Models that route chain-of-thought through a separate channel (Qwen3+
-    via llama.cpp, OpenAI o1) put it on
-    ``additional_kwargs.reasoning_content``. Empty for models that
-    don't expose one.
-    """
-    out: list[dict[str, str]] = []
-    for m in messages:
-        if isinstance(m, AIMessage):
-            rc = (getattr(m, "additional_kwargs", {}) or {}).get("reasoning_content")
-            if rc:
-                out.append({"content": rc})
-    return out
 
 
 async def run_agent(cfg: DictConfig) -> None:
@@ -149,9 +105,8 @@ async def run_agent(cfg: DictConfig) -> None:
         form_fill_max_retries=cfg.agent.form_fill.max_retries,
     )
 
-    output_dir = Path(cfg.paths.output_dir)
-    per_case_dir = output_dir / "predictions" / f"task{task_int}"
-    per_case_dir.mkdir(parents=True, exist_ok=True)
+    # Output mirrors the agent-input hierarchy: <output_dir>/task<N>/<case_id>/prediction.json
+    task_dir = Path(cfg.paths.output_dir) / f"task{task_int}"
 
     n_done = 0
     for query in queries:
@@ -190,22 +145,16 @@ async def run_agent(cfg: DictConfig) -> None:
                 f"form_fill_warnings={warnings}\n{exc}"
             ) from exc
 
-        action_log = _action_log_from_messages(result["messages"])
-        prediction = {
-            **structured,
-            "reasoning_trace": _final_assistant_text(result["messages"]),
-            "thinking_trace": _thinking_trace(result["messages"]),
-            "action_log": action_log,
-            "form_fill_warnings": warnings,
-        }
-
-        # Persist incrementally so partial progress survives interruption.
-        per_case_path = per_case_dir / f"{case_id}.json"
-        per_case_path.write_text(json.dumps(prediction, indent=2))
+        # Single output file per patient, in a per-case folder mirroring the
+        # agent input. The file is exactly the validated structured record.
+        case_dir = task_dir / case_id
+        case_dir.mkdir(parents=True, exist_ok=True)
+        per_case_path = case_dir / "prediction.json"
+        per_case_path.write_text(json.dumps(structured, indent=2))
         n_done += 1
-        log.info("Case %s done (%d actions) -> %s", case_id, len(action_log), per_case_path)
+        log.info("Case %s done -> %s", case_id, per_case_path)
 
-    log.info("Wrote %d predictions to %s", n_done, per_case_dir)
+    log.info("Wrote %d predictions under %s", n_done, task_dir)
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config")
