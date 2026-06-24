@@ -6,17 +6,17 @@ works — the runner uses :mod:`langchain_mcp_adapters`).
 Usage::
 
     python -m chimera_agent_baseline.mcp_server \\
-        --data-dir outputs/agent_input/task1 --resource-dir resources \\
+        --data-dir data/task1/agent_input --resource-dir resources \\
         --tool-registry task1
 
 .. note::
 
-    The action-log layer — every tool call is recorded with ``tool``,
-    ``args``, ``result``, and ``timestamp`` — is part of the challenge
-    contract and powers faithfulness evaluation. Add new tools, edit
-    existing ones, swap the registry; just keep the action log
-    intact. Submissions whose action log has been disabled or
-    tampered with will be rejected.
+    Tools are not mandatory: the participant container is a black box,
+    so tool use cannot be enforced or audited. Only the final structured
+    output (``Task1Output`` / ``Task2Output`` / ``Task3Output``) is
+    evaluated. The tools mirror the masked "Extended EHR view" sections
+    of the urologist forms — add new ones, edit existing ones, or swap
+    the registry freely.
 """
 
 import argparse
@@ -25,13 +25,16 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 
+from chimera_agent_baseline.features import FeatureStore
 from chimera_agent_baseline.tools.base import CaseDataStore, ToolSpec
-from chimera_agent_baseline.tools.definitions import TASK1_TOOLS, TASK2_TOOLS
+from chimera_agent_baseline.tools.definitions import TASK1_TOOLS, TASK2_TOOLS, TASK3_TOOLS
+from chimera_agent_baseline.tools.predictor import make_predictor_tool
 from chimera_agent_baseline.utils import setup_logging
 
 _REGISTRIES: dict[str, list[ToolSpec]] = {
     "task1": TASK1_TOOLS,
     "task2": TASK2_TOOLS,
+    "task3": TASK3_TOOLS,
 }
 
 log = logging.getLogger(__name__)
@@ -42,8 +45,16 @@ def create_server(
     resource_dir: str | None = None,
     tools: list[ToolSpec] | None = None,
     name: str = "Chimera Tools",
+    predictor_enabled: bool = False,
 ) -> FastMCP:
-    """Create an MCP server with precomputed clinical tools."""
+    """Create an MCP server with precomputed clinical tools.
+
+    When *predictor_enabled* is true, an optional ``get_image_predictor`` tool
+    is registered over the per-case ``features.json`` embeddings — it receives
+    all origins (MRI / biopsy / prostatectomy) so participants can fuse them
+    (see :mod:`chimera_agent_baseline.tools.predictor`). Off by default — the
+    baseline does not consume embeddings.
+    """
     mcp = FastMCP(name)
     store = CaseDataStore(data_dir)
     tools = tools if tools is not None else TASK1_TOOLS
@@ -52,6 +63,12 @@ def create_server(
 
     for tool_spec in tools:
         _register_precomputed_tool(mcp, store, tool_spec)
+
+    # -- Optional image-embedding predictor (template, off by default) ---------
+
+    if predictor_enabled:
+        feature_store = FeatureStore(data_dir)
+        mcp.tool()(make_predictor_tool(feature_store))
 
     # -- Knowledge retrieval (RAG) ---------------------------------------------
 
@@ -140,11 +157,21 @@ def main() -> None:
         "notes, family history); 'task2' = treatment-decision tools "
         "(PSA trend + labs dropped, pathology returns richer per-core data).",
     )
+    parser.add_argument(
+        "--enable-predictor",
+        action="store_true",
+        help="Register the optional get_image_predictor tool over features.json embeddings (default: off).",
+    )
     parser.add_argument("--log-level", default="INFO", help="Log level (DEBUG, INFO, WARNING, ERROR)")
     args = parser.parse_args()
 
     setup_logging(args.log_level)
-    server = create_server(args.data_dir, resource_dir=args.resource_dir, tools=_REGISTRIES[args.tool_registry])
+    server = create_server(
+        args.data_dir,
+        resource_dir=args.resource_dir,
+        tools=_REGISTRIES[args.tool_registry],
+        predictor_enabled=args.enable_predictor,
+    )
     server.run(transport="stdio")
 
 

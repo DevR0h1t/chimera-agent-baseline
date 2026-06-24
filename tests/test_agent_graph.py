@@ -19,7 +19,7 @@ from chimera_agent_baseline.agent.form_fill import (
     _final_assistant_text,
 )
 from chimera_agent_baseline.agent.graph import create_graph
-from chimera_agent_baseline.output.schema import Rating, eligible_variables
+from chimera_agent_baseline.output.schema import Weight, eligible_variables
 
 
 @tool
@@ -84,22 +84,21 @@ def test_graph_runs_through_form_fill():
     final_msg = AIMessage(content="Recommend biopsy: PI-RADS 5, high PSAD.")
     form_payload = {
         "case_id": "PT-T1",
-        "task": "mri_diagnostic",
-        "biopsy_recommendation": True,
-        "repeat_test": None,
-        "confidence": "Clear",
-        "decision_summary": "PI-RADS 5 plus PSAD 0.68 is decisive — biopsy required.",
-        "variable_ratings": {
-            "psa": {"rating": "Decisive", "reasoning": "PSA 24"},
-            "age": {"rating": "Noted", "reasoning": "61y"},
-            "dre": {"rating": "Not used", "reasoning": ""},
-            "comorbidity": {"rating": "Not used", "reasoning": ""},
-            "prior_biopsy": {"rating": "Not used", "reasoning": ""},
-            "pirads": {"rating": "Decisive", "reasoning": "PI-RADS 5"},
-            "psa_density": {"rating": "Decisive", "reasoning": "PSAD 0.68"},
-            "prostate_volume": {"rating": "Noted", "reasoning": "36 mL"},
-            "cspca": {"rating": "Important", "reasoning": "0.79"},
+        "task": 1,
+        "biopsy_decision": True,
+        "confidence": "clear",
+        "variable_weights": {
+            "psa": "decisive",
+            "age": "noted",
+            "dre": "not_used",
+            "comorbidity": "not_used",
+            "prior_biopsy": "not_used",
+            "pirads": "decisive",
+            "psa_density": "decisive",
+            "prostate_volume": "noted",
+            "cspca": "important",
         },
+        "reasoning": "PI-RADS 5 plus PSAD 0.68 is decisive — biopsy required.",
     }
     form_fill_msg = AIMessage(content=json.dumps(form_payload))
     model = _StubModel(responses=[tool_call_msg, final_msg, form_fill_msg])
@@ -120,11 +119,11 @@ def test_graph_runs_through_form_fill():
 
     assert "structured_response" in out
     sr = out["structured_response"]
-    # Form-fill stamped task name + decision are present.
-    assert sr["task"] == "mri_diagnostic"
-    assert sr["biopsy_recommendation"] is True
-    # Family-history rating padded to "Not used" because get_family_history
-    # was not actually called by the agent.
-    assert sr["variable_ratings"]["family_history"]["rating"] == Rating.NOT_USED.value
-    # Pirads kept as Decisive (mri tool was called).
-    assert sr["variable_ratings"]["pirads"]["rating"] == Rating.DECISIVE.value
+    # Form-fill stamped task + decision are present.
+    assert sr["task"] == 1
+    assert sr["biopsy_decision"] is True
+    # Family-history weight padded to "not_used" because get_family_history
+    # was not actually called by the agent (it is gated on that tool).
+    assert sr["variable_weights"]["family_history"] == Weight.NOT_USED.value
+    # Pirads kept as decisive.
+    assert sr["variable_weights"]["pirads"] == Weight.DECISIVE.value

@@ -15,8 +15,8 @@ provider-neutral: any LangChain ``BaseChatModel`` works.
 This module is fair game to edit — change the skeleton, swap the
 parser, tune the retry strategy, replace the whole node. The only
 constraint is that the final JSON must validate against
-:class:`Task1Output` / :class:`Task2Output`; submissions whose final
-output does not validate are rejected.
+:class:`Task1Output` / :class:`Task2Output` / :class:`Task3Output`;
+submissions whose final output does not validate are rejected.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.output_parsers import PydanticOutputParser
 
 from chimera_agent_baseline.output.schema import (
+    VARIABLES_BY_TASK,
     build_dynamic_model,
     eligible_variables,
     normalise_to_full_shape,
@@ -40,12 +41,13 @@ log = logging.getLogger(__name__)
 
 
 _SYSTEM_PROMPT = (
-    "You are filling out a structured reasoning form for the prostate-cancer "
-    "case you just analysed. The user message contains your decision "
-    "transcript and the action log of the tools you called. Output a SINGLE "
-    "JSON object matching the supplied schema EXACTLY — no extra keys, no "
-    "markdown fences, no commentary before or after the JSON."
+    "You are filling out the structured decision form for the prostate-cancer "
+    "case you just analysed. The user message contains your reasoning "
+    "transcript and the tools you called. Output a SINGLE JSON object matching "
+    "the supplied schema EXACTLY — no extra keys, no markdown fences, no "
+    "commentary before or after the JSON."
 )
+
 
 def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
     """Return a LangGraph node closure that captures the unbound *model*.
@@ -62,7 +64,7 @@ def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
 
         called = _called_tools_from_messages(messages)
         transcript = _final_assistant_text(messages)
-        elig = eligible_variables(task, called)
+        elig = eligible_variables(task, called) if task in VARIABLES_BY_TASK else []
 
         Dynamic = build_dynamic_model(task, called)
         parser = PydanticOutputParser(pydantic_object=Dynamic)
@@ -118,16 +120,10 @@ def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
                 max_retries,
                 case_id,
             )
-            structured_response = {
-                "case_id": case_id,
-                "task": "risk_stratification" if task == 2 else "mri_diagnostic",
-                "confidence": "Uncertain",
-                "decision_summary": "(Form-fill structured call failed validation; see form_fill_warnings.)",
-                "variable_ratings": {},
-            }
+            structured_response = _stub_response(task, case_id)
             warnings.append("invalid_schema=True")
 
-        # Pad omitted variables to "Not used" so downstream eval sees the
+        # Pad omitted variables to "not_used" so downstream eval sees the
         # full static shape.
         full = normalise_to_full_shape(task, structured_response)
         return {"structured_response": full, "form_fill_warnings": warnings}
@@ -140,6 +136,26 @@ def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
 # ---------------------------------------------------------------------------
 
 
+def _stub_response(task: int, case_id: str) -> dict[str, Any]:
+    """Deliberately decision-less stub so the run-level validator aborts.
+
+    Emitted only when every form-fill attempt failed to parse/validate. It
+    omits the decision field (``biopsy_decision`` / ``action`` /
+    ``months_to_recurrence``) on purpose, so the run-level schema check in
+    :mod:`chimera_agent_baseline.run` raises rather than silently writing a
+    fabricated decision.
+    """
+    stub: dict[str, Any] = {
+        "case_id": case_id,
+        "task": task,
+        "reasoning": "(Form-fill structured call failed validation; see form_fill_warnings.)",
+    }
+    if task in VARIABLES_BY_TASK:
+        stub["confidence"] = "uncertain"
+        stub["variable_weights"] = {}
+    return stub
+
+
 def _user_prompt(
     case_id: str,
     task: int,
@@ -148,7 +164,7 @@ def _user_prompt(
     eligible: list[str],
 ) -> str:
     tools_line = ", ".join(called_tools) if called_tools else "(no tools called)"
-    return (
+    head = (
         f"Case ID: {case_id}\n"
         f"Task: {task}\n\n"
         "Your reasoning transcript (final assistant message from the ReAct "
@@ -156,14 +172,22 @@ def _user_prompt(
         f"{transcript}\n"
         '"""\n\n'
         f"Tools you called during the ReAct loop: {tools_line}\n\n"
-        "Eligible variables for rating (you may ONLY rate these — every "
-        "other variable was either out of scope for this task or behind a "
-        "tool you did not call):\n"
+    )
+    if task not in VARIABLES_BY_TASK:
+        return head + (
+            "Now fill out the form: give your predicted months to recurrence "
+            "(a non-negative number) and a focused reasoning naming the 2-4 "
+            "factors that most influenced your estimate."
+        )
+    return head + (
+        "Variables you may weight (you may ONLY weight these — every other "
+        "variable was either out of scope for this task or behind a tool you "
+        "did not call):\n"
         f"  {', '.join(eligible) if eligible else '(none)'}\n\n"
-        "Now fill out the form. Use 'Not used' / 'Noted' / 'Important' / "
-        "'Decisive' for ratings; concise per-variable reasoning; an overall "
-        "confidence; and a focused decision_summary naming the 2-4 factors "
-        "that most influenced your recommendation."
+        "Now fill out the form. Weight each variable (not_used / noted / "
+        "important / decisive); give an overall confidence; and a focused "
+        "reasoning naming the 2-4 factors that most influenced your "
+        "recommendation."
     )
 
 
@@ -177,40 +201,48 @@ def _build_skeleton_instructions(task: int, eligible: list[str]) -> str:
     concrete shape with placeholder values is far more robust and is
     still unambiguous about which keys are required.
     """
-    rating_enum = '"Not used" | "Noted" | "Important" | "Decisive"'
-    confidence_enum = '"Clear" | "Borderline" | "Uncertain"'
+    if task == 3:
+        skeleton = "\n".join(
+            [
+                "{",
+                '  "case_id": "<the case id>",',
+                '  "task": 3,',
+                '  "months_to_recurrence": <number — predicted months to recurrence / last follow-up>,',
+                '  "reasoning": "<at least 40 chars; the evidence and the 2-4 factors that drove your estimate>"',
+                "}",
+            ]
+        )
+        return (
+            "Output a SINGLE JSON object matching exactly this shape (replace "
+            "every <...> with a real value):\n\n"
+            f"{skeleton}\n\n"
+            "Do NOT emit any other keys. Do NOT wrap in markdown fences. Do NOT echo the schema."
+        )
+
+    weight_enum = '"not_used" | "noted" | "important" | "decisive"'
+    confidence_enum = '"clear" | "borderline" | "uncertain"'
 
     if task == 1:
-        task_const = '"mri_diagnostic"'
-        decision_lines = [
-            '  "biopsy_recommendation": <true | false>,',
-            '  "repeat_test": <string with extra test you would request, or null>,',
-        ]
+        decision_line = '  "biopsy_decision": <true | false>,'
     else:
-        task_const = '"risk_stratification"'
-        treatment_enum = (
-            '"active_surveillance" | "watchful_waiting" | "radical_prostatectomy" '
-            '| "radiotherapy" | "focal_therapy" | "hormonal_therapy"'
-        )
-        decision_lines = [f'  "treatment_recommendation": <{treatment_enum}>,']
+        action_enum = '"active_surveillance" | "continued_surveillance" | "watchful_waiting" | "active_treatment"'
+        decision_line = f'  "action": <{action_enum}>,'
 
-    rating_lines = [
-        f'    "{var}": {{"rating": <{rating_enum}>, "reasoning": "<one or two sentences>"}},' for var in eligible
-    ]
-    if rating_lines:
-        rating_lines[-1] = rating_lines[-1].rstrip(",")
+    weight_lines = [f'    "{var}": <{weight_enum}>,' for var in eligible]
+    if weight_lines:
+        weight_lines[-1] = weight_lines[-1].rstrip(",")
 
     skeleton = "\n".join(
         [
             "{",
             '  "case_id": "<the case id>",',
-            f'  "task": {task_const},',
+            f'  "task": {task},',
+            decision_line,
             f'  "confidence": <{confidence_enum}>,',
-            '  "decision_summary": "<at least 40 chars; name the 2-4 factors that drove your call>",',
-            *decision_lines,
-            '  "variable_ratings": {',
-            *rating_lines,
-            "  }",
+            '  "variable_weights": {',
+            *weight_lines,
+            "  },",
+            '  "reasoning": "<at least 40 chars; name the 2-4 factors that drove your call>"',
             "}",
         ]
     )
@@ -219,10 +251,10 @@ def _build_skeleton_instructions(task: int, eligible: list[str]) -> str:
         "Output a SINGLE JSON object matching exactly this shape (replace "
         "every <...> with a real value):\n\n"
         f"{skeleton}\n\n"
-        f"`variable_ratings` MUST include all and only these keys: {', '.join(eligible)}.\n"
-        "Use the rating value 'Not used' (with empty reasoning) for any variable "
-        "that did not influence your decision. Do NOT emit any other keys at the "
-        "top level. Do NOT wrap in markdown fences. Do NOT echo the schema."
+        f"`variable_weights` MUST include all and only these keys: {', '.join(eligible)}.\n"
+        "Use the weight 'not_used' for any variable that did not influence your "
+        "decision. Do NOT emit any other keys at the top level. Do NOT wrap in "
+        "markdown fences. Do NOT echo the schema."
     )
 
 

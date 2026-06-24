@@ -2,7 +2,13 @@
 
 Two registries — one per task — are exposed by the MCP server. Each
 :class:`~chimera_agent_baseline.tools.base.ToolSpec` lists the fields
-from the per-case ``tools.json`` it returns.
+from the per-case ``clinical.json`` it returns.
+
+The tools mirror the masked "Extended EHR view" sections of the
+urologist forms: the structured "Clinical data" panel is rendered into
+the prompt up front, while the documents below were hidden behind a
+click and so must be actively requested. Each tool returns its
+``clinical.json`` field value directly.
 
 To add a custom tool, append a new ``ToolSpec`` to the appropriate
 registry below.
@@ -11,12 +17,13 @@ registry below.
 from chimera_agent_baseline.tools.base import ToolSpec
 
 # ---------------------------------------------------------------------------
-# Per-patient encounter tools.
+# Masked "Extended EHR view" documents — one tool per section.
 #
-# The patient context the agent always sees (encounter, vitals, PMHx, DRE
-# prose, age, headline PSA / PI-RADS, csPCa probability) is rendered into
-# the user prompt up front; the tools below cover the data the agent has
-# to actively pull up.
+# The structured "Clinical data" panel the agent always sees (encounter,
+# vitals, PMHx, age, PSA, PI-RADS, PSA density / velocity, prostate
+# volume, DRE, prior biopsy, csPCa probability; for task 2 also clinical
+# stage and biopsy Gleason / ISUP) is rendered into the prompt up front.
+# The tools below cover the documents the urologist had to reveal.
 # ---------------------------------------------------------------------------
 
 PSA_TREND = ToolSpec(
@@ -36,28 +43,41 @@ LAB_RESULTS = ToolSpec(
         "haematology, renal function, testosterone, alkaline phosphatase, "
         "LDH, etc.) as a list of {name, val, date, flag}."
     ),
-    fields=("labs",),
+    fields=("laboratory_results",),
 )
 
 MRI_REPORT = ToolSpec(
     name="get_mri_report",
     description=(
-        "Retrieve the radiologist's full mpMRI report as free text, plus the "
-        "structured imaging values it contains (PI-RADS, prostate volume, "
-        "PSA density, AI csPCa probability)."
+        "Retrieve the radiologist's full mpMRI report as free text. The "
+        "headline imaging values (PI-RADS, prostate volume, PSA density, AI "
+        "csPCa probability) are already in the prompt; this is the prose "
+        "report behind them."
     ),
-    fields=("imaging_report", "pirads", "prostate_volume", "psa_density", "cspca_pred"),
+    fields=("radiology_report",),
 )
 
 PATHOLOGY_REPORT = ToolSpec(
     name="get_pathology_report",
     description=(
-        "Retrieve the pathologist's full biopsy report as free text, plus "
-        "structured per-timepoint biopsy data (Gleason patterns, ISUP grade "
-        "group, cribriform / intraductal / %GP4 when reported). Returns an "
-        "empty report if the patient has not had a biopsy."
+        "Retrieve the pathologist's full biopsy report as free text. The "
+        "headline biopsy values (Gleason patterns, ISUP grade group) are "
+        "already in the prompt for biopsied patients; this is the prose "
+        "report behind them. Returns a 'no data' note if the patient has "
+        "not had a biopsy."
     ),
-    fields=("pathology_report", "biopsies", "prior_biopsy"),
+    fields=("pathology_report",),
+)
+
+SURGICAL_PATHOLOGY_REPORT = ToolSpec(
+    name="get_surgical_pathology_report",
+    description=(
+        "Retrieve the surgical (radical prostatectomy) pathology report as "
+        "free text: post-operative ISUP grade, margins, extraprostatic "
+        "extension, seminal-vesicle / lymph-node involvement, and stage. "
+        "Returns a 'no data' note if the patient has not had surgery."
+    ),
+    fields=("surgical_pathology_report",),
 )
 
 PREVIOUS_NOTES = ToolSpec(
@@ -81,7 +101,10 @@ FAMILY_HISTORY = ToolSpec(
 )
 
 
-# Task 1 — biopsy decision. Full per-encounter tool set.
+# Tasks 1 & 2 expose the same masked Extended EHR view, so they share the
+# same tool set. (Task 1's clinical.json has no pathology_report, so
+# get_pathology_report returns a "no data" note there — mirroring the
+# form's masked-but-empty pathology section.)
 TASK1_TOOLS: list[ToolSpec] = [
     PSA_TREND,
     LAB_RESULTS,
@@ -91,47 +114,24 @@ TASK1_TOOLS: list[ToolSpec] = [
     FAMILY_HISTORY,
 ]
 
-
-# Task 2 — treatment decision. The urologist arrives at the MDT with the
-# lab panel and PSA trend already in hand (in the prompt context up
-# front), so those tools drop out. Pathology returns a richer per-core
-# detail set since treatment choice depends on it.
-PATHOLOGY_REPORT_TREATMENT = ToolSpec(
-    name="get_pathology_report",
-    description=(
-        "Retrieve the full pathology report for the patient's prostate "
-        "biopsy / biopsies. Returns the prose report plus structured "
-        "per-timepoint detail: Gleason patterns, ISUP grade group "
-        "(reported and AI-predicted), cores positive / total, max core %, "
-        "dominant growth pattern, presence of high-risk patterns "
-        "(cribriform / IDC-P), perineural invasion (PNI), lymphovascular "
-        "invasion (LVI), and tumour location."
-    ),
-    fields=(
-        "pathology_report",
-        "biopsies",
-        "bx_isup",
-        "bx_gl_prim",
-        "bx_gl_sec",
-        "bx_gl_tert",
-        "bx_isup_pred",
-        "ct",
-        "cores_positive",
-        "cores_total",
-        "max_core_pct",
-        "growth_pattern",
-        "high_risk_patterns",
-        "pni",
-        "lvi",
-        "tumor_location",
-        "prior_biopsy",
-    ),
-)
-
-
 TASK2_TOOLS: list[ToolSpec] = [
+    PSA_TREND,
+    LAB_RESULTS,
     MRI_REPORT,
-    PATHOLOGY_REPORT_TREATMENT,
+    PATHOLOGY_REPORT,
+    PREVIOUS_NOTES,
+    FAMILY_HISTORY,
+]
+
+
+# Task 3 — recurrence prognosis. The post-treatment record is simplified
+# (age / PSA / DRE up front); the masked documents are the radiology
+# report, the biopsy and surgical pathology reports, previous notes, and
+# the family-history anamnesis. No PSA trend / lab panel.
+TASK3_TOOLS: list[ToolSpec] = [
+    MRI_REPORT,
+    PATHOLOGY_REPORT,
+    SURGICAL_PATHOLOGY_REPORT,
     PREVIOUS_NOTES,
     FAMILY_HISTORY,
 ]

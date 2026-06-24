@@ -6,13 +6,13 @@ import pytest
 
 from chimera_agent_baseline.mcp_server import create_server
 from chimera_agent_baseline.tools.base import CaseDataStore, ToolSpec
-from chimera_agent_baseline.tools.definitions import TASK1_TOOLS, TASK2_TOOLS
+from chimera_agent_baseline.tools.definitions import TASK1_TOOLS, TASK2_TOOLS, TASK3_TOOLS
 
 
 def _write_case(root, pid: str, payload: dict) -> None:
     sub = root / pid
     sub.mkdir(parents=True, exist_ok=True)
-    (sub / "tools.json").write_text(json.dumps(payload))
+    (sub / "clinical.json").write_text(json.dumps(payload))
 
 
 # ── CaseDataStore ────────────────────────────────────────────────────────
@@ -24,6 +24,18 @@ class TestCaseDataStore:
         _write_case(tmp_path, "PT-bbb", {"case_id": "PT-bbb", "pirads": "5"})
         store = CaseDataStore(tmp_path)
         assert sorted(store.list_case_ids()) == ["PT-aaa", "PT-bbb"]
+
+    def test_loads_non_pt_case_dirs(self, tmp_path):
+        # Task-2 case dirs are named T2-* (not PT-*); discovery is by file, not prefix.
+        _write_case(tmp_path, "T2-001", {"case_id": "T2-001", "pirads": "2"})
+        store = CaseDataStore(tmp_path)
+        assert store.list_case_ids() == ["T2-001"]
+
+    def test_ignores_dirs_without_clinical_json(self, tmp_path):
+        _write_case(tmp_path, "PT-a", {"case_id": "PT-a", "pirads": "4"})
+        (tmp_path / "logs").mkdir()  # no clinical.json -> not a case
+        store = CaseDataStore(tmp_path)
+        assert store.list_case_ids() == ["PT-a"]
 
     def test_get_case_found(self, tmp_path):
         _write_case(tmp_path, "PT-x", {"case_id": "PT-x", "pirads": "3"})
@@ -82,7 +94,37 @@ class TestMCPServer:
         assert len(TASK1_TOOLS) == 6
 
     def test_task2_tools_size(self):
-        assert len(TASK2_TOOLS) == 4
+        assert len(TASK2_TOOLS) == 6
+
+    def test_task3_tools_size_and_surgical_pathology(self):
+        assert len(TASK3_TOOLS) == 5
+        names = {t.name for t in TASK3_TOOLS}
+        assert "get_surgical_pathology_report" in names
+        # task 3 drops the PSA-trend / lab tools
+        assert "get_psa_trend" not in names
+        assert "get_lab_results" not in names
+
+    def test_create_server_task3(self, tmp_path):
+        _write_case(tmp_path, "T3-x", {"case_id": "T3-x"})
+        server = create_server(str(tmp_path), tools=TASK3_TOOLS)
+        assert server is not None
+
+    def test_predictor_tool_off_by_default(self, tmp_path):
+        _write_case(tmp_path, "PT-x", {"case_id": "PT-x"})
+        server = create_server(str(tmp_path), tools=TASK1_TOOLS)
+        assert "get_image_predictor" not in server._tool_manager._tools
+
+    def test_predictor_tool_registered_when_enabled(self, tmp_path):
+        _write_case(tmp_path, "PT-x", {"case_id": "PT-x"})
+        server = create_server(str(tmp_path), tools=TASK1_TOOLS, predictor_enabled=True)
+        assert "get_image_predictor" in server._tool_manager._tools
+
+    def test_surgical_pathology_tool_returns_field(self, tmp_path):
+        _write_case(tmp_path, "T3-x", {"case_id": "T3-x", "surgical_pathology_report": "pT3a, margins positive."})
+        server = create_server(str(tmp_path), tools=TASK3_TOOLS)
+        tools = server._tool_manager._tools
+        result = json.loads(tools["get_surgical_pathology_report"].fn(case_id="T3-x"))
+        assert result["surgical_pathology_report"] == "pT3a, margins positive."
 
     def test_custom_tool(self, tmp_path):
         _write_case(tmp_path, "PT-x", {"case_id": "PT-x", "psa": 4.2})
@@ -91,12 +133,11 @@ class TestMCPServer:
         assert server is not None
 
     def test_tool_returns_requested_fields(self, tmp_path):
-        _write_case(tmp_path, "PT-x", {"case_id": "PT-x", "pirads": "4", "psa_density": 0.4})
+        _write_case(tmp_path, "PT-x", {"case_id": "PT-x", "radiology_report": "PI-RADS 4 lesion."})
         server = create_server(str(tmp_path), tools=TASK1_TOOLS)
         tools = server._tool_manager._tools
         result = json.loads(tools["get_mri_report"].fn(case_id="PT-x"))
-        assert result["pirads"] == "4"
-        assert result["psa_density"] == 0.4
+        assert result["radiology_report"] == "PI-RADS 4 lesion."
 
     def test_tool_returns_no_data_note_when_fields_missing(self, tmp_path):
         _write_case(tmp_path, "PT-x", {"case_id": "PT-x"})  # no pathology fields

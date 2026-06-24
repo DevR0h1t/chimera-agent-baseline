@@ -3,8 +3,7 @@
 #
 # Local:
 #   make install                    - editable install with dev deps
-#   make run                        - run the agent locally (Hydra)
-#   make run-all                    - run task 1 then task 2
+#   make run                        - run the agent over all tasks under data/
 #   make test                       - run pytest
 #   make lint / make format         - ruff
 #
@@ -24,7 +23,7 @@ PROJECT_SLUG    ?= chimera_agent_baseline
 GC_IMAGE_TAG    ?= chimera-agent-baseline
 RUN_ARGS        ?=
 
-.PHONY: help install process-guidelines run run-all test lint format lock gc-build gc-test gc-save clean doctor
+.PHONY: help install process-guidelines run test lint format lock gc-build gc-test gc-save clean doctor
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -39,16 +38,8 @@ install: ## Install project in editable mode with dev deps
 process-guidelines: ## Process guidelines PDF into ChromaDB + save embedding model
 	python scripts/process_guidelines.py
 
-run: ## Run the agent locally (use RUN_ARGS for Hydra overrides)
+run: ## Run the agent locally over all tasks under data/ (RUN_ARGS for Hydra overrides)
 	python -m chimera_agent_baseline.run $(RUN_ARGS)
-
-run-all: ## Run task 1 then task 2 sequentially
-	python -m chimera_agent_baseline.run \
-		paths.input_dir=outputs/agent_input/task1 \
-		agent.tool_registry=task1 $(RUN_ARGS)
-	python -m chimera_agent_baseline.run \
-		paths.input_dir=outputs/agent_input/task2 \
-		agent.tool_registry=task2 $(RUN_ARGS)
 
 test: ## Run tests
 	pytest tests/ -v
@@ -72,9 +63,9 @@ lock: ## Pin dependencies to requirements.lock
 gc-build: ## Build the GC Docker image
 	docker build --platform=linux/amd64 --tag $(GC_IMAGE_TAG) .
 
-INPUT ?= outputs/agent_input/task1
+INPUT ?= data
 
-gc-test: gc-build ## Run the agent image against INPUT=<dir>, processing each case sequentially
+gc-test: gc-build ## Run the agent image against INPUT=<data_root> (task<N>/agent_input/...), all tasks
 	@mkdir -p test/output && chmod 777 test/output
 	@rm -rf test/output/*
 	docker run --rm \

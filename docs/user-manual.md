@@ -20,7 +20,7 @@ the full project layout, and troubleshooting.
 ## Useful commands beyond the README
 
 ```bash
-make run-all                                                # task 1 then 2 in one go
+make run RUN_ARGS="agent.tasks=[2]"                         # run a single task
 make run RUN_ARGS="+experiment=qwen_local"                  # swap LLM via overlay
 make lint
 make format
@@ -57,16 +57,17 @@ configs/config.yaml           Defaults (paths, model, generation, agent)
 configs/experiment/           Overlays via +experiment=<name>
 templates/prompts/            Jinja templates for the agent prompt
 resources/                    Guidelines DB + embedding model + GC config copy
-outputs/agent_input/task{1,2}/<pid>/{prompt,tools}.json   Per-case inputs
+data/task{1,2}/agent_input/<case>/{prompt,clinical}.json  Per-case inputs
 inference.py                  Grand Challenge container entrypoint
 ```
 
 ## What NOT to modify
 
-See the README's "What NOT to change" table — two locked files:
-`output/schema.py` (submission schema) and `mcp_server.py`'s
-action-log layer (faithfulness evaluation). Everything else,
-including `inference.py` and the agent graph, is fair game.
+See the README's "What NOT to change" table — one locked file:
+`output/schema.py` (the submission schema). Tool use is not audited (the
+participant container is a black box; only the final structured output is
+evaluated), so everything else — including `inference.py`, the tools, and
+the agent graph — is fair game.
 
 ## Troubleshooting
 
