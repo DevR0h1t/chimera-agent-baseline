@@ -42,9 +42,12 @@ patient, organised by task):
 # data/task2/agent_input/, each with one case subdirectory per patient.
 ```
 
-Run the agent (NVIDIA GPU with ≥16 GB VRAM):
+Run the agent (NVIDIA GPU with ≥24 GB VRAM). The in-process vLLM backend is a
+heavy, GPU-only dependency, so it is **not** part of `make install` — install it
+once on the GPU box:
 
 ```bash
+make install-vllm                                            # adds vLLM (Linux GPU only)
 make run                                                     # all tasks under data/
 make run RUN_ARGS="agent.tasks=[2]"                          # just task 2
 make run RUN_ARGS="agent.limit=5"                            # first 5 cases per task
@@ -52,6 +55,10 @@ make run RUN_ARGS="agent.limit=5"                            # first 5 cases per
 
 `make run` walks `data/task<N>/agent_input/` for every task present and writes
 per-case predictions to `test/output/task<N>/<case_id>/prediction.json`.
+
+On a 24 GB card, lower vLLM's memory fraction if startup OOMs (a desktop session
+or other process can hold a few GB): `make run RUN_ARGS="generation.gpu_memory_utilization=0.80"`.
+Prefer the Docker path below if you don't want vLLM in your local environment.
 
 ## Layout
 
