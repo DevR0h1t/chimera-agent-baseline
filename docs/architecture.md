@@ -36,8 +36,8 @@ The server runs as a stdio subprocess and is framework-agnostic.
 
 **Source**: `src/chimera_agent_baseline/mcp_server.py`.
 
-Two registries, selected via the Hydra config key
-`agent.tool_registry=task1|task2`:
+One registry per task, selected automatically from the task number the
+runner is processing (`task1` / `task2` / `task3`):
 
 Both tasks expose the same six tools — the masked "Extended EHR view"
 documents the urologist could reveal — plus guideline search:

@@ -1,10 +1,11 @@
 """Grand Challenge entrypoint.
 
-Reads inputs from ``/input``, runs the agent on each case, writes
-structured predictions to ``/output``. Thin wrapper around
+Reads inputs from ``/input`` (the same ``task<N>/agent_input/<case>/``
+hierarchy used locally), runs every task present, and writes structured
+predictions to ``/output/task<N>/<case>/prediction.json``. Thin wrapper around
 :func:`chimera_agent_baseline.run.run_agent` that loads the same
-``configs/config.yaml`` Hydra reads locally and overrides the path
-fields to the GC container's mount points.
+``configs/config.yaml`` Hydra reads locally and overrides the path fields to
+the GC container's mount points.
 
 For local development, use ``make run`` instead.
 """
@@ -31,7 +32,7 @@ MODEL_PATH = Path("/opt/ml/model")
 def load_config():
     """Load the canonical config and override paths for the GC container."""
     cfg = OmegaConf.load(CONFIG_PATH)
-    OmegaConf.update(cfg, "paths.input_dir", str(INPUT_PATH))
+    OmegaConf.update(cfg, "paths.data_root", str(INPUT_PATH))
     OmegaConf.update(cfg, "paths.output_dir", str(OUTPUT_PATH))
     OmegaConf.update(cfg, "paths.resource_dir", str(RESOURCE_PATH))
     OmegaConf.update(cfg, "paths.model_dir", str(MODEL_PATH))
@@ -42,7 +43,7 @@ def run() -> int:
     cfg = load_config()
     setup_logging(cfg.logging.level)
 
-    log.info("Starting agent inference (model=%s, registry=%s)", cfg.model.model_id, cfg.agent.tool_registry)
+    log.info("Starting agent inference (model=%s, tasks=%s)", cfg.model.model_id, list(cfg.agent.tasks))
 
     embed_svc = start_embedding_service(cfg.paths.resource_dir)
     try:

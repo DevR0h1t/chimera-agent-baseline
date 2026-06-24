@@ -1,16 +1,21 @@
 """Agent entry-point.
 
-Hydra-driven runner that starts the MCP tool server as a subprocess
-(stdio transport) and runs the LangGraph ReAct + form-fill graph on
-each case in the input directory, one at a time.
+Hydra-driven runner. Walks the hierarchical input tree
+``<data_root>/task<N>/agent_input/<case>/`` and runs the LangGraph ReAct +
+form-fill graph on every case, one task at a time, writing
+``<output_dir>/task<N>/<case>/prediction.json``.
+
+By default every task present under ``data_root`` is run (``agent.tasks``);
+missing task dirs are skipped. The model is loaded once and reused across
+tasks. The Grand Challenge container uses the same layout, rooted at
+``/input`` / ``/output``.
 
 Usage::
 
-    make run                                            # task 1, defaults
-    make run RUN_ARGS="agent.tool_registry=task2 \\
-        paths.input_dir=data/task2/agent_input"          # task 2
-    make run RUN_ARGS="+experiment=qwen_local"          # swap to Qwen
-    make run RUN_ARGS="agent.limit=5"                   # first 5 cases
+    make run                                       # all tasks under data/
+    make run RUN_ARGS="agent.tasks=[2]"            # just task 2
+    make run RUN_ARGS="+experiment=qwen_local"     # swap to Qwen
+    make run RUN_ARGS="agent.limit=5"              # first 5 cases per task
 """
 
 import asyncio
@@ -39,7 +44,28 @@ load_dotenv()
 log = logging.getLogger(__name__)
 
 
-_REGISTRY_TO_TASK_INT = {"task1": 1, "task2": 2, "task3": 3}
+_VALID_TASKS = (1, 2, 3)
+
+
+def _task_input_dir(cfg: DictConfig, task: int) -> Path:
+    return Path(cfg.paths.data_root) / f"task{task}" / "agent_input"
+
+
+def _run_plan(cfg: DictConfig) -> list[tuple[int, Path]]:
+    """Resolve ``agent.tasks`` to ``(task_int, input_dir)`` pairs that exist."""
+    plan: list[tuple[int, Path]] = []
+    for raw in cfg.agent.tasks:
+        task = int(raw)
+        if task not in _VALID_TASKS:
+            raise ValueError(f"Unknown task {task!r} in agent.tasks; expected one of {list(_VALID_TASKS)}")
+        input_dir = _task_input_dir(cfg, task)
+        if input_dir.is_dir():
+            plan.append((task, input_dir))
+        else:
+            log.warning("Skipping task %d: %s not found", task, input_dir)
+    if not plan:
+        raise FileNotFoundError(f"No task data found under {cfg.paths.data_root} for tasks {list(cfg.agent.tasks)}")
+    return plan
 
 
 def _filter_queries(queries: list[dict], cfg: DictConfig) -> list[dict]:
@@ -61,48 +87,42 @@ def _filter_queries(queries: list[dict], cfg: DictConfig) -> list[dict]:
     return queries
 
 
-async def run_agent(cfg: DictConfig) -> None:
-    """Load model, connect MCP tools, run the agent on each case."""
-
-    tool_registry = cfg.agent.tool_registry
-    if tool_registry not in _REGISTRY_TO_TASK_INT:
-        raise ValueError(
-            f"Unknown agent.tool_registry={tool_registry!r}; expected one of {sorted(_REGISTRY_TO_TASK_INT)}"
-        )
-    task_int = _REGISTRY_TO_TASK_INT[tool_registry]
-
-    queries = _filter_queries(load_cases(cfg.paths.input_dir, task=task_int), cfg)
-
-    mcp_args = [
+def _mcp_args(cfg: DictConfig, input_dir: Path, registry: str) -> list[str]:
+    args = [
         "-m",
         "chimera_agent_baseline.mcp_server",
         "--data-dir",
-        str(cfg.paths.input_dir),
+        str(input_dir),
         "--resource-dir",
         str(cfg.paths.resource_dir),
         "--tool-registry",
-        tool_registry,
+        registry,
     ]
     # Optional image-embedding predictor tool (off by default).
     predictor = cfg.agent.get("predictor")
     if predictor and predictor.get("enabled"):
-        mcp_args += ["--enable-predictor"]
+        args += ["--enable-predictor"]
+    return args
 
-    log.info("Starting MCP server (data_dir=%s, tool_registry=%s)", cfg.paths.input_dir, tool_registry)
+
+async def _run_task(cfg: DictConfig, task_int: int, input_dir: Path, model, system_prompt: str) -> int:
+    """Run every case for one task; returns the number of predictions written."""
+    registry = f"task{task_int}"
+    queries = _filter_queries(load_cases(input_dir, task=task_int), cfg)
+
+    log.info("Task %d: starting MCP server (data_dir=%s)", task_int, input_dir)
     client = MultiServerMCPClient(
         {
             "chimera": {
                 "command": sys.executable,
-                "args": mcp_args,
+                "args": _mcp_args(cfg, input_dir, registry),
                 "transport": "stdio",
             },
         }
     )
     tools = await client.get_tools()
-    log.info("Loaded %d tools from MCP server", len(tools))
+    log.info("Task %d: loaded %d tools from MCP server", task_int, len(tools))
 
-    model = load_model(cfg)
-    system_prompt = build_system_prompt()
     graph = create_graph(
         tools,
         model,
@@ -117,7 +137,7 @@ async def run_agent(cfg: DictConfig) -> None:
     n_done = 0
     for query in queries:
         case_id = query["case_id"]
-        log.info("Processing case %s (task: %s)", case_id, query.get("task", "unknown"))
+        log.info("Task %d: processing case %s", task_int, case_id)
 
         # The graph's ReAct loop runs the agent and tools until a final
         # assistant message arrives, then the terminal ``form_fill`` node
@@ -130,37 +150,44 @@ async def run_agent(cfg: DictConfig) -> None:
         }
         result = await graph.ainvoke(initial_state, {"recursion_limit": cfg.agent.max_iterations})
 
-        # Fail-early schema check: the structured part of the prediction
-        # must validate against Task1Output / Task2Output before we move
-        # on. Form-fill already retries internally; if we still got here
-        # with an invalid payload, something is wrong and partial outputs
-        # would just mask it.
+        # Fail-early schema check: the structured prediction must validate
+        # against the per-task model before we move on. Form-fill already
+        # retries internally; if we still got here with an invalid payload,
+        # something is wrong and partial outputs would just mask it.
         structured = result.get("structured_response") or {}
         warnings = result.get("form_fill_warnings", [])
         try:
             TASK_OUTPUT_MODELS[task_int].model_validate(structured)
         except ValidationError as exc:
-            log.error(
-                "Output schema validation failed for case %s. form_fill_warnings=%s",
-                case_id,
-                warnings,
-            )
+            log.error("Output schema validation failed for case %s. form_fill_warnings=%s", case_id, warnings)
             raise RuntimeError(
                 f"Case {case_id}: structured output does not validate against "
-                f"{TASK_OUTPUT_MODELS[task_int].__name__}. "
-                f"form_fill_warnings={warnings}\n{exc}"
+                f"{TASK_OUTPUT_MODELS[task_int].__name__}. form_fill_warnings={warnings}\n{exc}"
             ) from exc
 
         # Single output file per patient, in a per-case folder mirroring the
         # agent input. The file is exactly the validated structured record.
         case_dir = task_dir / case_id
         case_dir.mkdir(parents=True, exist_ok=True)
-        per_case_path = case_dir / "prediction.json"
-        per_case_path.write_text(json.dumps(structured, indent=2))
+        (case_dir / "prediction.json").write_text(json.dumps(structured, indent=2))
         n_done += 1
-        log.info("Case %s done -> %s", case_id, per_case_path)
 
-    log.info("Wrote %d predictions under %s", n_done, task_dir)
+    log.info("Task %d: wrote %d predictions under %s", task_int, n_done, task_dir)
+    return n_done
+
+
+async def run_agent(cfg: DictConfig) -> None:
+    """Run every task present under ``data_root`` (model loaded once, reused)."""
+    plan = _run_plan(cfg)
+    log.info("Run plan: tasks %s", [t for t, _ in plan])
+
+    model = load_model(cfg)
+    system_prompt = build_system_prompt()
+
+    total = 0
+    for task_int, input_dir in plan:
+        total += await _run_task(cfg, task_int, input_dir, model, system_prompt)
+    log.info("Done. Wrote %d predictions across %d task(s).", total, len(plan))
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="config")

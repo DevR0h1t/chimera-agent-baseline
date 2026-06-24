@@ -20,7 +20,7 @@ the full project layout, and troubleshooting.
 ## Useful commands beyond the README
 
 ```bash
-make run-all                                                # task 1 then 2 in one go
+make run RUN_ARGS="agent.tasks=[2]"                         # run a single task
 make run RUN_ARGS="+experiment=qwen_local"                  # swap LLM via overlay
 make lint
 make format

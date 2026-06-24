@@ -40,44 +40,46 @@ patient, organised by task):
 Run the agent (NVIDIA GPU with ≥16 GB VRAM):
 
 ```bash
-make run                                                     # task 1
-make run RUN_ARGS="agent.tool_registry=task2 \
-    paths.input_dir=data/task2/agent_input"                  # task 2
-make run RUN_ARGS="agent.limit=5"                            # 5 cases
+make run                                                     # all tasks under data/
+make run RUN_ARGS="agent.tasks=[2]"                          # just task 2
+make run RUN_ARGS="agent.limit=5"                            # first 5 cases per task
 ```
 
-Per-case predictions land in `test/output/task<N>/<case_id>/prediction.json`.
+`make run` walks `data/task<N>/agent_input/` for every task present and writes
+per-case predictions to `test/output/task<N>/<case_id>/prediction.json`.
 
 ## Layout
 
 | Local path | Container path | Contents |
 |---|---|---|
-| `data/task{1,2}/agent_input/<case>/{prompt,clinical}.json` | `/input` | Per-case agent inputs |
+| `data/task<N>/agent_input/<case>/{prompt,clinical,features}.json` | `/input/task<N>/agent_input/<case>/…` | Per-case agent inputs |
 | `test/output/` | `/output` | Predictions written by the agent |
 | `model/` | `/opt/ml/model` | LLM weights (gitignored) |
 | `resources/` | `/opt/app/resources` | Config, guidelines DB, embedding model |
 
-The participant ships `prompt.json`; `clinical.json` is read only by the
-MCP server and reaches the agent through tool calls.
+The input root (`data/` locally, `/input` in the container) holds the same
+`task<N>/agent_input/<case>/` tree for every task; the agent runs all tasks
+present. The participant ships `prompt.json`; `clinical.json` is read only by
+the MCP server and reaches the agent through tool calls.
 
-To test in the GC Docker container:
+To test in the GC Docker container (mounts the whole data root, runs all tasks):
 
 ```bash
 make gc-build
-make gc-test                                                  # task 1
-make gc-test INPUT=data/task2/agent_input                     # task 2
+make gc-test                                                  # all tasks under data/
 ```
 
 ## Per-case I/O
 
-Each case is a directory under `/input` (read-only). You write one JSON per
-case to `/output/task<N>/<case_id>/prediction.json`, mirroring the input tree.
+Each case is a directory under `/input/task<N>/agent_input/` (read-only). You
+write one JSON per case to `/output/task<N>/<case_id>/prediction.json`,
+mirroring the input tree.
 
 ```
-/input/<case_id>/prompt.json    # patient context rendered into the agent prompt
-/input/<case_id>/clinical.json  # served by the MCP server through tool calls
-/input/<case_id>/features.json  # frozen foundation-model embeddings (optional)
-/output/task<N>/<case_id>/prediction.json   # the prediction (Task1Output / Task2Output / Task3Output)
+/input/task<N>/agent_input/<case_id>/prompt.json    # patient context rendered into the agent prompt
+/input/task<N>/agent_input/<case_id>/clinical.json  # served by the MCP server through tool calls
+/input/task<N>/agent_input/<case_id>/features.json  # frozen foundation-model embeddings (optional)
+/output/task<N>/<case_id>/prediction.json           # the prediction (Task1/2/3 Output)
 ```
 
 `prompt.json` + `clinical.json` mirror the urologist forms: `prompt.json` is
@@ -206,11 +208,12 @@ yet shipped.
 
 ### Docker invocation
 
-The Grand Challenge container reads `/input` and writes `/output`:
+The Grand Challenge container reads the input root at `/input` (holding
+`task<N>/agent_input/<case>/`) and writes `/output`:
 
 ```bash
 docker run --rm --gpus all \
-    -v $PWD/data/task1/agent_input:/input:ro \
+    -v $PWD/data:/input:ro \
     -v $PWD/test/output:/output \
     chimera-agent-baseline
 ```

@@ -4,20 +4,21 @@
 # All parameters live here, not in code.
 # Override per-experiment with +experiment=name or bare key=value on the CLI.
 #
-#   make run                                                 # uses this file
-#   make run RUN_ARGS="agent.tool_registry=task2 \
-#       paths.input_dir=data/task2/agent_input"              # task 2
+#   make run                                                 # all tasks under data/
+#   make run RUN_ARGS="agent.tasks=[2]"                      # just task 2
 #   make run RUN_ARGS="+experiment=qwen_local"               # swap model
-#   make run RUN_ARGS="agent.limit=5"                        # first 5 cases
+#   make run RUN_ARGS="agent.limit=5"                        # first 5 cases per task
 # =============================================================================
 
 defaults:
   - _self_
 
 # --- Paths ---
-# In the Grand Challenge container these are overridden to /input, /output, etc.
+# The agent walks <data_root>/task<N>/agent_input/<case>/ and writes
+# <output_dir>/task<N>/<case>/prediction.json. In the Grand Challenge container
+# these are overridden to /input and /output (same hierarchy).
 paths:
-  input_dir: data/task1/agent_input
+  data_root: data
   output_dir: test/output
   resource_dir: resources
   model_dir: model
@@ -43,10 +44,10 @@ model:
 agent:
   max_iterations: 25             # max ReAct loop steps before stopping
   step_timeout: 120              # seconds per graph step
-  # Which task's tool set to expose: 'task1' (biopsy decision) or 'task2'
-  # (treatment decision). Pair the registry with the matching input dir.
-  tool_registry: task1
-  # Optional case-subset filters. ``pids`` wins over ``limit`` when both set.
+  # Which tasks to run. Defaults to all; task dirs missing under data_root are
+  # skipped with a warning. Each task auto-selects its tool set and input dir.
+  tasks: [1, 2, 3]
+  # Optional case-subset filters (applied per task). ``pids`` wins over ``limit``.
   pids: null
   limit: null
   # Form-fill node — terminal step that emits the structured submission.
