@@ -66,10 +66,9 @@ inference.py                  Grand Challenge container entrypoint
 ## What NOT to modify
 
 See the README's "What NOT to change" table — one locked file:
-`output/schema.py` (the submission schema). Tool use is not audited (the
-participant container is a black box; only the final structured output is
-evaluated), so everything else — including `inference.py`, the tools, and
-the agent graph — is fair game.
+`output/schema.py` (the submission schema). Only the final structured
+output is evaluated and tool use is not scored, so everything else —
+including `inference.py`, the tools, and the agent graph — is fair game.
 
 ## Troubleshooting
 

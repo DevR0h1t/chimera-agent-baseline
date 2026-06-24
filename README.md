@@ -255,8 +255,7 @@ matches the GC platform — your container must not write to it.
 One piece is part of the challenge contract — submissions that violate it
 are rejected. Everything else (system prompt, tools, models, agent graph,
 form-fill node, configs, even the entry-point if you want) is fair game.
-The participant container is a black box, so tool use is not enforced or
-audited — only the final structured output is evaluated.
+Only the final structured output is evaluated; tool use is not scored.
 
 | File | Why it's locked |
 |---|---|
