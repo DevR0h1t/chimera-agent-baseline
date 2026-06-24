@@ -44,7 +44,12 @@ def _load_vllm(cfg: DictConfig) -> BaseChatModel:
     model_path = _resolve_model_path(cfg)
     log.info("Loading vLLM model from %s", model_path)
 
-    llm = LLM(model=model_path, dtype="auto", max_model_len=cfg.generation.get("max_model_len", 32768))
+    llm = LLM(
+        model=model_path,
+        dtype="auto",
+        max_model_len=cfg.generation.get("max_model_len", 32768),
+        gpu_memory_utilization=cfg.generation.get("gpu_memory_utilization", 0.9),
+    )
 
     params = SamplingParams(
         temperature=cfg.generation.temperature,
