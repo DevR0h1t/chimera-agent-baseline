@@ -25,8 +25,13 @@ Download the LLM and embedding model (requires accepted licenses on
 
 ```bash
 python -c "from huggingface_hub import snapshot_download; snapshot_download('google/gemma-4-E2B-it', local_dir='model/')"
-make process-guidelines    # builds resources/guidelines_db (~1.2 GB)
+make fetch-embedding-model    # downloads embeddinggemma-300m (~1.2 GB) into resources/embedding_model/
 ```
+
+The guidelines vector DB (`resources/guidelines_db/`) ships pre-built in
+the repo, so RAG works once the embedding model above is in place — no PDF
+processing required. To rebuild the corpus from the source PDF instead, see
+[Model Configuration → Embedding model (RAG)](docs/models.md#embedding-model-rag).
 
 Get the per-case agent inputs (`prompt.json` + `clinical.json` per
 patient, organised by task):

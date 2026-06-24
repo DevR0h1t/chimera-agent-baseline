@@ -125,6 +125,56 @@ generation:
 make run RUN_ARGS="+experiment=llama8b"
 ```
 
+## Embedding model (RAG)
+
+The `search_guidelines` tool runs a local RAG pipeline (see
+[architecture.md](architecture.md)): a ChromaDB vector store of guideline
+chunks, queried with embeddings from `google/embeddinggemma-300m`. Two
+artifacts must be present under `resources/` for it to return real results:
+
+| Artifact | Size | Shipped how |
+|---|---|---|
+| `resources/guidelines_db/` | ~20 MB | **Committed to the repo** — pre-built, use as-is |
+| `resources/embedding_model/` | ~1.2 GB | **Gitignored** — you download it |
+
+The Grand Challenge container has no network at runtime, and the Dockerfile
+bakes the whole `resources/` tree into the image (`COPY resources/ …`). So
+the embedding model must be on disk **before** `make gc-build`, or
+`search_guidelines` returns empty results (the embedding service silently
+skips startup when `resources/embedding_model/` is missing).
+
+### Download the model (recommended — keeps the pre-built DB)
+
+Accept the license on
+[embeddinggemma](https://huggingface.co/google/embeddinggemma-300m) and set
+`HF_TOKEN` (e.g. in `.env`), then:
+
+```bash
+make fetch-embedding-model        # → scripts/download_embedding_model.py
+```
+
+This fetches only the model into `resources/embedding_model/` and leaves the
+committed DB untouched. It's the path participants want: no PDF, no
+re-embedding. The model is saved in the same `SentenceTransformer` on-disk
+format the runtime loads, so it stays compatible with the committed DB.
+
+### Rebuild the corpus from the PDF (maintainer-only)
+
+```bash
+make process-guidelines           # → scripts/process_guidelines.py
+```
+
+This re-extracts and re-chunks `docs/internal/guidelines.pdf`, re-embeds
+everything, and writes **both** `guidelines_db/` and `embedding_model/`. It
+requires the source PDF, which is **not** shipped in the repo — so it's for
+maintainers updating the knowledge base, not for participants. Only reach for
+it if you're changing the corpus or chunking; otherwise prefer
+`make fetch-embedding-model`.
+
+> If you swap the embedding model, you must rebuild the DB with the same
+> model — the committed `guidelines_db/` only matches `embeddinggemma-300m`
+> (query and document embeddings must come from one model).
+
 ## Choosing a model
 
 - **Tool calling** is required by the ReAct loop. The form-fill node

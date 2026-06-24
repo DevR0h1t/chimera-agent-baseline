@@ -23,7 +23,7 @@ PROJECT_SLUG    ?= chimera_agent_baseline
 GC_IMAGE_TAG    ?= chimera-agent-baseline
 RUN_ARGS        ?=
 
-.PHONY: help install process-guidelines run test lint format lock gc-build gc-test gc-save clean doctor
+.PHONY: help install fetch-embedding-model process-guidelines run test lint format lock gc-build gc-test gc-save clean doctor
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -35,7 +35,10 @@ help: ## Show this help
 install: ## Install project in editable mode with dev deps
 	uv pip install -e ".[dev]"
 
-process-guidelines: ## Process guidelines PDF into ChromaDB + save embedding model
+fetch-embedding-model: ## Download the RAG embedding model into resources/ (uses the committed guidelines DB as-is)
+	python scripts/download_embedding_model.py
+
+process-guidelines: ## Maintainer-only: rebuild the guidelines DB + model from the source PDF (needs docs/internal/guidelines.pdf)
 	python scripts/process_guidelines.py
 
 run: ## Run the agent locally over all tasks under data/ (RUN_ARGS for Hydra overrides)

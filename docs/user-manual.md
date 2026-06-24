@@ -74,7 +74,11 @@ the agent graph — is fair game.
 ## Troubleshooting
 
 - **CUDA OOM**: lower `generation.max_model_len` (default 32768) — try 8192.
-- **Guidelines DB missing**: `make process-guidelines` (needs `HF_TOKEN`).
+- **`search_guidelines` returns empty results** (or logs "skipping embedding
+  service" / "Embedding service not running"): the embedding model is
+  missing. Run `make fetch-embedding-model` (needs `HF_TOKEN`). The
+  guidelines DB itself ships pre-built in `resources/guidelines_db/`; see
+  [models.md → Embedding model (RAG)](models.md#embedding-model-rag).
 - **HF 403 Forbidden**: accept the model license on HuggingFace.
 - **vLLM compile takes long on first run**: ~30 s, cached in `~/.cache/vllm/`.
 - **`make gc-test` permission error on `/output`**: `chmod 777 test/output`.
