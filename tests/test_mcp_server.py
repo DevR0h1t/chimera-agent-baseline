@@ -6,7 +6,7 @@ import pytest
 
 from chimera_agent_baseline.mcp_server import create_server
 from chimera_agent_baseline.tools.base import CaseDataStore, ToolSpec
-from chimera_agent_baseline.tools.definitions import TASK1_TOOLS, TASK2_TOOLS
+from chimera_agent_baseline.tools.definitions import TASK1_TOOLS, TASK2_TOOLS, TASK3_TOOLS
 
 
 def _write_case(root, pid: str, payload: dict) -> None:
@@ -95,6 +95,26 @@ class TestMCPServer:
 
     def test_task2_tools_size(self):
         assert len(TASK2_TOOLS) == 6
+
+    def test_task3_tools_size_and_surgical_pathology(self):
+        assert len(TASK3_TOOLS) == 5
+        names = {t.name for t in TASK3_TOOLS}
+        assert "get_surgical_pathology_report" in names
+        # task 3 drops the PSA-trend / lab tools
+        assert "get_psa_trend" not in names
+        assert "get_lab_results" not in names
+
+    def test_create_server_task3(self, tmp_path):
+        _write_case(tmp_path, "T3-x", {"case_id": "T3-x"})
+        server = create_server(str(tmp_path), tools=TASK3_TOOLS)
+        assert server is not None
+
+    def test_surgical_pathology_tool_returns_field(self, tmp_path):
+        _write_case(tmp_path, "T3-x", {"case_id": "T3-x", "surgical_pathology_report": "pT3a, margins positive."})
+        server = create_server(str(tmp_path), tools=TASK3_TOOLS)
+        tools = server._tool_manager._tools
+        result = json.loads(tools["get_surgical_pathology_report"].fn(case_id="T3-x"))
+        assert result["surgical_pathology_report"] == "pT3a, margins positive."
 
     def test_custom_tool(self, tmp_path):
         _write_case(tmp_path, "PT-x", {"case_id": "PT-x", "psa": 4.2})

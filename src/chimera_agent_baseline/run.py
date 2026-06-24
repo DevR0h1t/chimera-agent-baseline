@@ -39,7 +39,7 @@ load_dotenv()
 log = logging.getLogger(__name__)
 
 
-_REGISTRY_TO_TASK_INT = {"task1": 1, "task2": 2}
+_REGISTRY_TO_TASK_INT = {"task1": 1, "task2": 2, "task3": 3}
 
 
 def _filter_queries(queries: list[dict], cfg: DictConfig) -> list[dict]:

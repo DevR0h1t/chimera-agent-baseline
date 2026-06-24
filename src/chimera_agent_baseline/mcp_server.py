@@ -26,12 +26,13 @@ import logging
 from mcp.server.fastmcp import FastMCP
 
 from chimera_agent_baseline.tools.base import CaseDataStore, ToolSpec
-from chimera_agent_baseline.tools.definitions import TASK1_TOOLS, TASK2_TOOLS
+from chimera_agent_baseline.tools.definitions import TASK1_TOOLS, TASK2_TOOLS, TASK3_TOOLS
 from chimera_agent_baseline.utils import setup_logging
 
 _REGISTRIES: dict[str, list[ToolSpec]] = {
     "task1": TASK1_TOOLS,
     "task2": TASK2_TOOLS,
+    "task3": TASK3_TOOLS,
 }
 
 log = logging.getLogger(__name__)

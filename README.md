@@ -156,8 +156,15 @@ Task 2 replaces `biopsy_decision` with a single `action` — one of
 `active_surveillance` | `continued_surveillance` | `watchful_waiting` |
 `active_treatment` — and uses the task-2 variable set. Task 3 is a
 numeric prognosis: `months_to_recurrence` (float) + `reasoning` only (no
-weights / confidence). *(Task 3 input data and tools are not yet shipped;
-its output contract is defined and ready.)*
+weights / confidence).
+
+Task 3 (recurrence prognosis) uses a much-simplified `prompt.json` —
+`case_id`, `task`, `age`, `psa`, and `dre` (the free-text physical
+examination) — and a 5-tool `clinical.json`: `radiology_report`,
+`pathology_report` (biopsy), `surgical_pathology_report`,
+`previous_notes`, `family_history`. The loader, tools, prompt template,
+and output contract all handle task 3; only the task-3 case data is not
+yet shipped.
 
 ### Docker invocation
 

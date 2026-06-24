@@ -5,15 +5,41 @@
   read-only structured values the urologist saw up front.
 
   The form's "Extended EHR view" documents (radiology / MRI report,
-  pathology report, previous notes, laboratory results, PSA history,
+  pathology reports, previous notes, laboratory results, PSA history,
   family-history anamnesis) were MASKED and revealed on request — they are
   served by the MCP tools and MUST NOT be inlined here.
 
-  Participants can copy this file to a path of their choosing and pass that
-  path to ``render_baseline_prompt`` to swap the framing without touching
-  the framework code.
+  Tasks 1 & 2 share the full panel; task 3 (recurrence prognosis) uses a
+  much-simplified panel. Participants can copy this file to a path of their
+  choosing and pass it to ``render_baseline_prompt`` to swap the framing.
 #}
 {%- macro show(v) -%}{{ v if (v is defined and v not in (none, '')) else '—' }}{%- endmacro -%}
+{% if task == 3 -%}
+You are a senior urologist reviewing a patient with prostate cancer who has
+completed primary treatment. The structured record below is shown to you up
+front. The full documents (radiology / MRI report, biopsy pathology report,
+surgical pathology report, previous notes, and the family-history anamnesis)
+are not shown and must be pulled up via the available tools.
+
+Case ID: {{ case_id }}
+Task: {{ task }}
+
+Clinical data (read-only — values loaded from the record):
+  - {{ show(age) }}-year-old male
+  - PSA: {{ show(psa) }} ng/mL
+
+Physical examination (DRE): {{ show(dre) }}
+
+Information you can request via tools (the masked "Extended EHR view"):
+  - radiology / MRI report
+  - biopsy pathology report
+  - surgical pathology report
+  - previous GP / urology consultation notes
+  - family history of prostate cancer (anamnesis)
+
+Question:
+Following primary treatment, predict this patient's time to biochemical recurrence, in months.
+{%- else -%}
 You are a senior urologist reviewing a patient case. The structured clinical
 record below is shown to you up front, exactly as in the reading form. Some
 documents are not shown and must be pulled up via the available tools
@@ -103,4 +129,5 @@ Question:
 What is your treatment recommendation for this patient?
 {%- else -%}
 Based on this patient's data, do you recommend biopsy?
+{%- endif %}
 {%- endif %}

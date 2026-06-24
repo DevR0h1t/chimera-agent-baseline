@@ -66,3 +66,22 @@ def test_load_cases_skips_subdirs_without_prompt(tmp_path: Path):
     (cases / "logs").mkdir()  # no prompt.json -> not a case
     queries = load_cases(cases, task=1, templates_dir=tdir)
     assert [q["case_id"] for q in queries] == ["PT-a"]
+
+
+def test_task3_renders_simplified_prompt(tmp_path: Path):
+    # Uses the real template to exercise the task-3 branch (age / PSA / DRE only).
+    cases = tmp_path / "cases"
+    _write_pair(
+        cases,
+        "T3-001",
+        {"case_id": "T3-001", "task": 3, "age": 64, "psa": 8.2, "dre": "Firm nodule, right base."},
+    )
+    ctx = load_cases(cases, task=3)[0]["context"]
+    assert "64-year-old male" in ctx
+    assert "PSA: 8.2 ng/mL" in ctx
+    assert "Physical examination (DRE): Firm nodule, right base." in ctx
+    assert "time to biochemical recurrence" in ctx
+    assert "surgical pathology report" in ctx
+    # The task-1/2 panel must not leak into the simplified task-3 prompt.
+    assert "PI-RADS" not in ctx
+    assert "csPCa" not in ctx

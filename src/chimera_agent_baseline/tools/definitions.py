@@ -69,6 +69,17 @@ PATHOLOGY_REPORT = ToolSpec(
     fields=("pathology_report",),
 )
 
+SURGICAL_PATHOLOGY_REPORT = ToolSpec(
+    name="get_surgical_pathology_report",
+    description=(
+        "Retrieve the surgical (radical prostatectomy) pathology report as "
+        "free text: post-operative ISUP grade, margins, extraprostatic "
+        "extension, seminal-vesicle / lymph-node involvement, and stage. "
+        "Returns a 'no data' note if the patient has not had surgery."
+    ),
+    fields=("surgical_pathology_report",),
+)
+
 PREVIOUS_NOTES = ToolSpec(
     name="get_previous_notes",
     description=(
@@ -90,8 +101,8 @@ FAMILY_HISTORY = ToolSpec(
 )
 
 
-# Both forms expose the same masked Extended EHR view, so both tasks share
-# the same tool set. (Task 1's clinical.json has no pathology_report, so
+# Tasks 1 & 2 expose the same masked Extended EHR view, so they share the
+# same tool set. (Task 1's clinical.json has no pathology_report, so
 # get_pathology_report returns a "no data" note there — mirroring the
 # form's masked-but-empty pathology section.)
 TASK1_TOOLS: list[ToolSpec] = [
@@ -108,6 +119,19 @@ TASK2_TOOLS: list[ToolSpec] = [
     LAB_RESULTS,
     MRI_REPORT,
     PATHOLOGY_REPORT,
+    PREVIOUS_NOTES,
+    FAMILY_HISTORY,
+]
+
+
+# Task 3 — recurrence prognosis. The post-treatment record is simplified
+# (age / PSA / DRE up front); the masked documents are the radiology
+# report, the biopsy and surgical pathology reports, previous notes, and
+# the family-history anamnesis. No PSA trend / lab panel.
+TASK3_TOOLS: list[ToolSpec] = [
+    MRI_REPORT,
+    PATHOLOGY_REPORT,
+    SURGICAL_PATHOLOGY_REPORT,
     PREVIOUS_NOTES,
     FAMILY_HISTORY,
 ]
