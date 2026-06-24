@@ -12,11 +12,10 @@ offline tool-call parser, for instance, sometimes does not emit a tool
 call when there is only one forced schema-tool). Prompt-and-parse is
 provider-neutral: any LangChain ``BaseChatModel`` works.
 
-This module is fair game to edit — change the skeleton, swap the
-parser, tune the retry strategy, replace the whole node. The only
-constraint is that the final JSON must validate against
-:class:`Task1Output` / :class:`Task2Output` / :class:`Task3Output`;
-submissions whose final output does not validate are rejected.
+The node retries on validation errors up to ``max_retries`` times and
+raises if every attempt fails — there is no partial / stub fallback, so
+an unfillable case aborts the run loudly rather than writing a
+half-formed prediction.
 """
 
 from __future__ import annotations
@@ -53,8 +52,9 @@ def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
     """Return a LangGraph node closure that captures the unbound *model*.
 
     *max_retries* is the number of validation attempts before the node
-    falls back to a stub structured response (the run-level validator
-    in :mod:`chimera_agent_baseline.run` will then raise on the stub).
+    raises :class:`RuntimeError`. A successful attempt yields a payload
+    that already validates against the per-task output model
+    (Task1Output / Task2Output / Task3Output).
     """
 
     def form_fill(state: dict[str, Any]) -> dict[str, Any]:
@@ -101,7 +101,7 @@ def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
                 obj = parser.parse(_extract_json_object(raw))
                 structured_response = obj.model_dump(mode="json")
                 break
-            except Exception as exc:  # noqa: BLE001 — must not crash the graph
+            except Exception as exc:  # noqa: BLE001 — any parse/validation failure triggers a retry
                 warnings.append(f"attempt {attempt}: {type(exc).__name__}: {exc}")
                 log.warning("form_fill parse failed (attempt %d) for %s: %s", attempt, case_id, exc)
                 if attempt == max_retries:
@@ -114,14 +114,10 @@ def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
                 )
 
         if structured_response is None:
-            log.error(
-                "form_fill: all %d attempts failed for %s — emitting stub; "
-                "the run-level schema validator will then abort the run",
-                max_retries,
-                case_id,
+            raise RuntimeError(
+                f"form_fill: case {case_id}: all {max_retries} attempts failed to "
+                f"produce schema-valid output. form_fill_warnings={warnings}"
             )
-            structured_response = _stub_response(task, case_id)
-            warnings.append("invalid_schema=True")
 
         # Pad omitted variables to "not_used" so downstream eval sees the
         # full static shape.
@@ -134,26 +130,6 @@ def make_form_fill_node(model: BaseChatModel, max_retries: int = 3):
 # ---------------------------------------------------------------------------
 # Prompt builders + helpers
 # ---------------------------------------------------------------------------
-
-
-def _stub_response(task: int, case_id: str) -> dict[str, Any]:
-    """Deliberately decision-less stub so the run-level validator aborts.
-
-    Emitted only when every form-fill attempt failed to parse/validate. It
-    omits the decision field (``biopsy_decision`` / ``action`` /
-    ``months_to_recurrence``) on purpose, so the run-level schema check in
-    :mod:`chimera_agent_baseline.run` raises rather than silently writing a
-    fabricated decision.
-    """
-    stub: dict[str, Any] = {
-        "case_id": case_id,
-        "task": task,
-        "reasoning": "(Form-fill structured call failed validation; see form_fill_warnings.)",
-    }
-    if task in VARIABLES_BY_TASK:
-        stub["confidence"] = "uncertain"
-        stub["variable_weights"] = {}
-    return stub
 
 
 def _user_prompt(

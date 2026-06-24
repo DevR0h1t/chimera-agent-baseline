@@ -254,8 +254,7 @@ def main():
     output_dir = Path(args.output_dir)
 
     if not Path(pdf_path).exists():
-        log.error("PDF not found: %s", pdf_path)
-        return
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
 
     # Extract and chunk
     pages = extract_pages(pdf_path)

@@ -30,13 +30,11 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from omegaconf import DictConfig
-from pydantic import ValidationError
 
 from chimera_agent_baseline.agent.graph import create_graph
 from chimera_agent_baseline.agent.prompts import build_system_prompt
 from chimera_agent_baseline.case_loader import load_cases
 from chimera_agent_baseline.models import load_model
-from chimera_agent_baseline.output.schema import TASK_OUTPUT_MODELS
 from chimera_agent_baseline.rag import start_embedding_service
 from chimera_agent_baseline.utils import setup_logging
 
@@ -150,20 +148,10 @@ async def _run_task(cfg: DictConfig, task_int: int, input_dir: Path, model, syst
         }
         result = await graph.ainvoke(initial_state, {"recursion_limit": cfg.agent.max_iterations})
 
-        # Fail-early schema check: the structured prediction must validate
-        # against the per-task model before we move on. Form-fill already
-        # retries internally; if we still got here with an invalid payload,
-        # something is wrong and partial outputs would just mask it.
-        structured = result.get("structured_response") or {}
-        warnings = result.get("form_fill_warnings", [])
-        try:
-            TASK_OUTPUT_MODELS[task_int].model_validate(structured)
-        except ValidationError as exc:
-            log.error("Output schema validation failed for case %s. form_fill_warnings=%s", case_id, warnings)
-            raise RuntimeError(
-                f"Case {case_id}: structured output does not validate against "
-                f"{TASK_OUTPUT_MODELS[task_int].__name__}. form_fill_warnings={warnings}\n{exc}"
-            ) from exc
+        # form_fill is the single validation point: it parses the model's
+        # output against the per-task Pydantic model and raises if every
+        # retry fails, so the structured_response here is already valid.
+        structured = result["structured_response"]
 
         # Single output file per patient, in a per-case folder mirroring the
         # agent input. The file is exactly the validated structured record.

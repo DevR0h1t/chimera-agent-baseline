@@ -1,7 +1,5 @@
 """Tests for the RAG module."""
 
-from pathlib import Path
-
 import pytest
 
 from chimera_agent_baseline.rag import GuidelinesSearch
@@ -49,19 +47,16 @@ class TestGuidelinesSearch:
 
 
 class TestMCPServerFallback:
-    def test_create_server_without_resource_dir(self):
+    def test_create_server_without_resource_dir(self, tmp_path):
         """Server creates fine without resource_dir (guidelines returns empty)."""
         from chimera_agent_baseline.mcp_server import create_server
 
-        server = create_server(str(Path(__file__).parent.parent / "test" / "input" / "task1"))
+        server = create_server(str(tmp_path))
         assert server is not None
 
     def test_create_server_with_missing_db(self, tmp_path):
         """Server creates fine when resource_dir exists but has no guidelines_db."""
         from chimera_agent_baseline.mcp_server import create_server
 
-        server = create_server(
-            str(Path(__file__).parent.parent / "test" / "input" / "task1"),
-            resource_dir=str(tmp_path),
-        )
+        server = create_server(str(tmp_path), resource_dir=str(tmp_path))
         assert server is not None

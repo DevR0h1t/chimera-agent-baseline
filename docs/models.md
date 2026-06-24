@@ -54,14 +54,18 @@ Download the weights, no code changes needed.
 | `mistral` | Mistral, Mixtral | `[TOOL_CALLS]` + JSON |
 | `pythonic` | Python-style calls | `func_name(arg=val)` |
 
-List parsers available in your vLLM install:
+`model.tool_parser` selects a vLLM parser-utils module —
+`vllm.tool_parsers.<parser>_utils`, whose `parse_tool_calls()` the
+backend calls. List the parsers available in your vLLM install:
 
 ```bash
-ls "$(python -c 'import vllm.tool_parsers; print(vllm.tool_parsers.__path__[0])')"/*_tool_parser.py
+ls "$(python -c 'import vllm.tool_parsers; print(vllm.tool_parsers.__path__[0])')"/*_utils.py
 ```
 
-Fallback chain: model-specific vLLM parser → generic JSON parser →
-Gemma 4 bare format.
+If the named parser module can't be loaded, the run fails loudly at the
+first generation rather than silently producing no tool calls — set
+`model.tool_parser` to a parser your vLLM ships, or use the
+OpenAI-compatible provider.
 
 ## Using an OpenAI-compatible server
 

@@ -210,17 +210,27 @@ def _extract_reasoning_prefix(clean_text: str, tool_calls: list[dict]) -> str:
 
 
 def _parse_tool_calls(text: str, parser: str = "gemma4") -> list[dict]:
-    """Extract tool calls from decoded model output via vLLM's parser utils."""
+    """Extract tool calls from decoded model output via vLLM's parser utils.
+
+    A missing parser module or one without ``parse_tool_calls`` means the
+    agent could never issue a tool call, which would silently degrade the
+    whole ReAct loop — so this raises instead of returning an empty list.
+    """
     import importlib
 
     module_path = f"vllm.tool_parsers.{parser}_utils"
     try:
         mod = importlib.import_module(module_path)
-    except ImportError:
-        log.debug("vLLM tool-parser module %s not found", module_path)
-        return []
+    except ImportError as exc:
+        raise RuntimeError(
+            f"Could not import vLLM tool-parser module {module_path!r} for "
+            f"model.tool_parser={parser!r}. Set model.tool_parser to a parser "
+            f"shipped by your vLLM install, or use the OpenAI-compatible provider "
+            f"(configs/experiment/qwen_local.yaml)."
+        ) from exc
     try:
         return mod.parse_tool_calls(text, strict=False)
-    except AttributeError:
-        log.debug("vLLM module %s has no parse_tool_calls()", module_path)
-        return []
+    except AttributeError as exc:
+        raise RuntimeError(
+            f"vLLM module {module_path!r} has no parse_tool_calls(); it cannot back model.tool_parser={parser!r}."
+        ) from exc

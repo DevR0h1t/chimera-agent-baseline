@@ -13,11 +13,8 @@ module.
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
-
-log = logging.getLogger(__name__)
 
 
 def render_baseline_prompt(
@@ -55,6 +52,9 @@ def load_cases(
     Any subdirectory containing a ``prompt.json`` is treated as a case;
     case directories are named ``PT-<id>`` (task 1) or ``T2-<n>``
     (task 2), so we do not filter on a name prefix.
+
+    Fails loudly: a missing directory, malformed JSON, or an input
+    directory with no cases all raise rather than being silently skipped.
     """
     cases_dir = Path(cases_dir)
     if not cases_dir.is_dir():
@@ -66,8 +66,7 @@ def load_cases(
         try:
             payload = json.loads(prompt_path.read_text())
         except json.JSONDecodeError as e:
-            log.warning("Skipping %s: invalid JSON (%s)", prompt_path, e)
-            continue
+            raise ValueError(f"{prompt_path}: invalid JSON: {e}") from e
         out.append(
             {
                 "case_id": payload["case_id"],
@@ -75,4 +74,6 @@ def load_cases(
                 "context": render_baseline_prompt(payload, templates_dir, template_name),
             }
         )
+    if not out:
+        raise FileNotFoundError(f"No cases (subdirectories with prompt.json) found in {cases_dir}")
     return out

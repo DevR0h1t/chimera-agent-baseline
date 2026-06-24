@@ -102,7 +102,6 @@ doctor: ## Check that local prerequisites are working
 
 clean: ## Remove local build artifacts and caches
 	rm -rf build/ dist/ *.egg-info src/*.egg-info
-	rm -rf outputs/llm_cache/ logs/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@echo "Cleaned local artifacts."

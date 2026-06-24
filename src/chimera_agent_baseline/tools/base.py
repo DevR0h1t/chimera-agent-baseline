@@ -75,21 +75,15 @@ class CaseDataStore:
 
     def _load(self, data_dir: Path) -> None:
         if not data_dir.is_dir():
-            log.warning("Data dir %s is not a directory", data_dir)
-            return
+            raise FileNotFoundError(f"Data dir {data_dir} is not a directory")
 
         case_subdirs = sorted(p for p in data_dir.iterdir() if p.is_dir() and (p / CASE_DATA_FILENAME).exists())
-        if not case_subdirs:
-            log.warning("No */%s subdirectories found in %s", CASE_DATA_FILENAME, data_dir)
-            return
-
         for sub in case_subdirs:
             case_file = sub / CASE_DATA_FILENAME
             try:
                 case = json.loads(case_file.read_text())
-            except json.JSONDecodeError:
-                log.warning("Skipping %s: invalid JSON", case_file)
-                continue
+            except json.JSONDecodeError as e:
+                raise ValueError(f"{case_file}: invalid JSON: {e}") from e
             case_id = case.get("case_id") or sub.name
             self._cases[case_id] = case
         log.info("Loaded %d cases from %s", len(self._cases), data_dir)
