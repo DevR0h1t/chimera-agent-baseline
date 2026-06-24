@@ -27,6 +27,9 @@ Task: {{ task }}
 Clinical data (read-only — values loaded from the record):
   - {{ show(age) }}-year-old male
   - PSA: {{ show(psa) }} ng/mL
+{%- if active_treatment_prior_to_surgery %}
+  - Active treatment prior to surgery: {{ active_treatment_prior_to_surgery }}
+{%- endif %}
 
 Physical examination (DRE): {{ show(dre) }}
 
