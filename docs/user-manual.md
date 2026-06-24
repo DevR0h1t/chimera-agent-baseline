@@ -10,8 +10,9 @@ the full project layout, and troubleshooting.
 |---|---|
 | Python 3.12+ | Language runtime |
 | [uv](https://docs.astral.sh/uv/) | Package manager |
-| NVIDIA GPU ≥ 16 GB VRAM | vLLM in-process inference (Gemma 4 ≈ 10 GB) |
+| NVIDIA GPU ≥ 24 GB VRAM | vLLM in-process inference (Gemma 4 ≈ 10 GB weights + KV cache + CUDA graphs) |
 | CUDA 12.x + drivers | Required by vLLM |
+| vLLM (`make install-vllm`) | In-process backend for local `make run` — GPU-only, not in `make install` |
 | Docker + NVIDIA Container Toolkit | For `make gc-test` |
 | ~15 GB disk | Model weights + guidelines DB + embedding model |
 | HuggingFace token | For gated models (Gemma 4, embeddinggemma) |
@@ -66,14 +67,18 @@ inference.py                  Grand Challenge container entrypoint
 ## What NOT to modify
 
 See the README's "What NOT to change" table — one locked file:
-`output/schema.py` (the submission schema). Tool use is not audited (the
-participant container is a black box; only the final structured output is
-evaluated), so everything else — including `inference.py`, the tools, and
-the agent graph — is fair game.
+`output/schema.py` (the submission schema). Only the final structured
+output is evaluated and tool use is not scored, so everything else —
+including `inference.py`, the tools, and the agent graph — is fair game.
 
 ## Troubleshooting
 
-- **CUDA OOM**: lower `generation.max_model_len` (default 32768) — try 8192.
+- **CUDA OOM / "Free memory ... less than desired GPU memory utilization"**:
+  vLLM reserves a fraction of total VRAM (default 0.9), which is too aggressive
+  on a 24 GB consumer card — especially if a desktop session holds a few GB.
+  Lower it: `make run RUN_ARGS="generation.gpu_memory_utilization=0.80"` (the
+  same key works for `gc-test` via `configs/config.yaml`). If it still OOMs,
+  also lower `generation.max_model_len` (default 32768) — try 8192.
 - **`search_guidelines` returns empty results** (or logs "skipping embedding
   service" / "Embedding service not running"): the embedding model is
   missing. Run `make fetch-embedding-model` (needs `HF_TOKEN`). The
@@ -81,7 +86,13 @@ the agent graph — is fair game.
   [models.md → Embedding model (RAG)](models.md#embedding-model-rag).
 - **HF 403 Forbidden**: accept the model license on HuggingFace.
 - **vLLM compile takes long on first run**: ~30 s, cached in `~/.cache/vllm/`.
-- **`make gc-test` permission error on `/output`**: `chmod 777 test/output`.
+- **`make gc-test` permission error on `/output`** (`Permission denied`
+  removing a previous run's `test/output/task*/...`): the container writes
+  outputs as its non-root user (UID 999), so your host user can't delete the
+  nested files on the next run. `make gc-test` now cleans them inside a root
+  container automatically; to clear them by hand:
+  `docker run --rm --user 0 -v $PWD/test/output:/o alpine rm -rf /o/*`
+  (or `sudo rm -rf test/output/*`).
 - **Form-fill validation fails repeatedly**: the run aborts with a
   `RuntimeError` naming the failed case and the per-attempt validation
   errors (logged, not written to the output file). Common causes are

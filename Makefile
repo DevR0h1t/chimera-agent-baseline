@@ -35,6 +35,9 @@ help: ## Show this help
 install: ## Install project in editable mode with dev deps
 	uv pip install -e ".[dev]"
 
+install-vllm: ## Install the in-process vLLM backend for local GPU runs (Linux GPU box only)
+	uv pip install -e ".[dev,vllm]"
+
 fetch-embedding-model: ## Download the RAG embedding model into resources/ (uses the committed guidelines DB as-is)
 	python scripts/download_embedding_model.py
 
@@ -55,9 +58,24 @@ format: ## Auto-format and auto-fix
 	ruff format src/ tests/
 	ruff check --fix src/ tests/
 
-lock: ## Pin dependencies to requirements.lock
-	uv pip freeze --exclude-editable > requirements.lock
-	@echo "Pinned $$(wc -l < requirements.lock | tr -d ' ') packages to requirements.lock"
+# Base image the container builds on. KEEP IN SYNC with the Dockerfile FROM.
+# Used by `make lock` to compute the project dependency delta on top of it.
+BASE_IMAGE ?= vllm/vllm-openai@sha256:6d8429e38e3747723ca07ee1b17972e09bb9c51c4032b266f24fb1cc3b22ed8f
+
+lock: gc-build ## Regenerate requirements.lock (project deps resolved on top of the pinned base image)
+	@docker run --rm --entrypoint pip $(BASE_IMAGE) freeze | sort > /tmp/chimera-base-freeze.txt
+	@docker run --rm --entrypoint pip $(GC_IMAGE_TAG) freeze | sort > /tmp/chimera-built-freeze.txt
+	@{ echo "# Project dependency closure, fully pinned for reproducible builds."; \
+	   echo "#"; \
+	   echo "# These are the packages the project layer installs/upgrades ON TOP OF"; \
+	   echo "# the base image pinned in the Dockerfile. Together — pinned base image"; \
+	   echo "# + this lockfile — a build is deterministic."; \
+	   echo "#"; \
+	   echo "# Regenerate with \`make lock\` (keep Makefile BASE_IMAGE in sync with the"; \
+	   echo "# Dockerfile FROM)."; \
+	   comm -13 /tmp/chimera-base-freeze.txt /tmp/chimera-built-freeze.txt | grep -v '^chimera_agent_baseline'; \
+	 } > requirements.lock
+	@echo "Wrote requirements.lock ($$(grep -vc '^#' requirements.lock) pinned packages)"
 
 # =============================================================================
 # Grand Challenge container
@@ -70,7 +88,12 @@ INPUT ?= data
 
 gc-test: gc-build ## Run the agent image against INPUT=<data_root> (task<N>/agent_input/...), all tasks
 	@mkdir -p test/output && chmod 777 test/output
-	@rm -rf test/output/*
+	@# The container writes outputs as its non-root user (UID 999), so a plain
+	@# host `rm` of a previous run's nested files fails with permission denied.
+	@# Clean inside a throwaway root container instead.
+	@docker run --rm --user 0 --entrypoint sh \
+		--volume $(CURDIR)/test/output:/clean \
+		$(GC_IMAGE_TAG) -c 'rm -rf /clean/* /clean/.[!.]* 2>/dev/null' || true
 	docker run --rm \
 		--network none \
 		--gpus all \

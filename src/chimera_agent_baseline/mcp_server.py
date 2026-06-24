@@ -11,12 +11,12 @@ Usage::
 
 .. note::
 
-    Tools are not mandatory: the participant container is a black box,
-    so tool use cannot be enforced or audited. Only the final structured
-    output (``Task1Output`` / ``Task2Output`` / ``Task3Output``) is
-    evaluated. The tools mirror the masked "Extended EHR view" sections
-    of the urologist forms — add new ones, edit existing ones, or swap
-    the registry freely.
+    Tools are optional and not scored: only the final structured output
+    (``Task1Output`` / ``Task2Output`` / ``Task3Output``) is evaluated.
+    They mirror the masked "Extended EHR view" sections of the urologist
+    forms and reveal those documents on request, so calling them gives
+    the agent more evidence to reason over — add new ones, edit existing
+    ones, or swap the registry freely.
 """
 
 import argparse

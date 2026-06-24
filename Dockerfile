@@ -9,7 +9,11 @@
 # Model:   /opt/ml/model   (read-only, weights uploaded separately)
 # App:     /opt/app        (read-only, application code + resources)
 # =============================================================================
-FROM --platform=linux/amd64 vllm/vllm-openai:latest
+# Base image pinned by digest for reproducible builds. This is
+# vllm/vllm-openai:latest as of 2026-06 (ships vLLM 0.23.0 + CUDA + PyTorch +
+# transformers 4.x). Keep this digest in sync with the Makefile BASE_IMAGE and
+# regenerate requirements.lock (`make lock`) whenever you bump it.
+FROM --platform=linux/amd64 vllm/vllm-openai@sha256:6d8429e38e3747723ca07ee1b17972e09bb9c51c4032b266f24fb1cc3b22ed8f
 
 ENV PYTHONUNBUFFERED=1
 
@@ -18,19 +22,14 @@ RUN groupadd -r user && useradd -m --no-log-init -r -g user user
 
 WORKDIR /opt/app
 
-# Gemma 4 requires transformers >=5.x; the vLLM base image ships 4.x.
-# Remove this line once a vLLM release bundles transformers 5.x.
-RUN pip install --no-cache-dir --upgrade transformers
+# Install the pinned dependency closure resolved on top of this base image.
+# The lockfile includes the transformers 5.x upgrade Gemma 4 requires, so the
+# build is fully deterministic — no unpinned `pip install --upgrade`.
+COPY --chown=user:user requirements.lock pyproject.toml README.md /opt/app/
+RUN pip install --no-cache-dir -r requirements.lock
 
-# Install project dependencies. Uses a stub src/ so hatchling can resolve
-# the package, then reinstalls with the actual source.
-COPY --chown=user:user pyproject.toml README.md /opt/app/
-RUN mkdir -p src/chimera_agent_baseline && \
-    touch src/chimera_agent_baseline/__init__.py && \
-    pip install --no-cache-dir --no-color . && \
-    rm -rf src/
-
-# Copy application code and install the package (no-deps, source only)
+# Copy application code and install the package itself (deps already satisfied
+# by the lockfile above, so --no-deps).
 COPY --chown=user:user src/ /opt/app/src/
 COPY --chown=user:user inference.py /opt/app/
 RUN pip install --no-cache-dir --no-deps .

@@ -90,13 +90,12 @@ makes the variable un-rateable for any case. The headline values
 (PI-RADS, PSA density, Gleason / ISUP, …) are in `prompt.json`, so those
 variables are always rateable regardless of tools.
 
-## Tool use is not audited
+## Tools are optional
 
-The participant container is a black box, so tool calls cannot be
-enforced or recorded by the harness. Only the final structured output is
-evaluated — there is no action log. The MCP tools exist to let the agent
-retrieve the masked EHR documents; using them well is in the
-participant's interest, not a graded artifact.
+Only the final structured output is evaluated — tool calls are not scored.
+But the MCP tools reveal the masked EHR documents behind each case, so
+calling them gives the agent more evidence to reason over. Use them
+because they improve the decision, not because they're graded.
 
 ## Feature embeddings
 
@@ -151,7 +150,7 @@ python scripts/process_guidelines.py --pdf path/to/your/guidelines.pdf
 
 Each case writes a single file,
 `test/output/task<N>/<case_id>/prediction.json`, which is exactly the
-validated structured record (no extra trace/log fields):
+validated structured record:
 
 | Field | Tasks | Purpose |
 |---|---|---|

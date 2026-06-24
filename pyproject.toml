@@ -31,6 +31,13 @@ dev = [
     "debugpy",
     "ipython",
 ]
+# In-process vLLM backend for local GPU runs (provider=vllm). Heavy (pulls
+# CUDA PyTorch), Linux + supported-Python only — install on a GPU box with
+# `make install-vllm`. The Docker image gets vLLM from its base image instead.
+# Pinned to match the container's base image (vllm/vllm-openai).
+vllm = [
+    "vllm==0.23.0",
+]
 
 [tool.hatch.build]
 packages = ["src/chimera_agent_baseline"]

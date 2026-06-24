@@ -70,6 +70,7 @@ generation:
   temperature: 1.0
   max_new_tokens: 4096
   max_model_len: 32768           # vLLM context window
+  gpu_memory_utilization: 0.9    # fraction of total VRAM vLLM may use (lower for consumer GPUs / shared desktops)
   top_p: 0.95
 
 # --- Hydra settings ---

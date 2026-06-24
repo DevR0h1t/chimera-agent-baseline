@@ -1,4 +1,4 @@
-# CHIMERA-agent Challenge
+# CHIMERA-Agent Challenge
 
 ## Links
 
@@ -6,50 +6,67 @@
 
 ## Overview
 
-Participants design agent-level decision policies that leverage pre-built, modality-specific foundation models for prostate cancer clinical decision-making. Submissions must include structured reasoning traces explaining how evidence was interpreted and integrated. Input data is provided as precomputed features (`.h5`) and clinical variables (`.csv`) — raw images are not used at inference time.
+Participants build an agent that makes prostate-cancer clinical decisions
+from structured clinical data and masked EHR documents, and explains its
+reasoning. Each case ships as JSON, not raw images:
+
+- `prompt.json` — the structured clinical panel the agent always sees.
+- `clinical.json` — the masked "Extended EHR view" documents, revealed
+  only when the agent calls the matching tool.
+- `features.json` — optional frozen foundation-model image embeddings
+  (MRI / biopsy / prostatectomy), for participants who want to build a
+  predictor tool on top.
+
+See [README → Per-case I/O](../README.md#per-case-io) for the field-level
+layout and [architecture.md](architecture.md) for the tool registry. The
+exact submission shape for every task is the Pydantic contract in
+`src/chimera_agent_baseline/output/schema.py`.
 
 ## Tasks
 
-### Task 1: MRI-Only Diagnostic Decision
+### Task 1 — MRI-only biopsy decision
 
-Decide whether biopsy is warranted from multiparametric MRI features and basic clinical variables (age, PSA, PSA density, prostate volume), and explain which evidence drove the decision.
+Decide whether to biopsy from MRI findings and basic clinical variables
+(age, PSA, PSA density, prostate volume), and explain what drove the call.
 
-- **Input:** Precomputed MRI features (`.h5`) + clinical variables (`.csv`)
-- **Output:** JSON containing:
-  1. **Biopsy recommendation** — binary yes/no
-  2. **Repeat test** — free-text describing any additional test you would request first, or null
-  3. **Variable ratings** — per-variable Decisive / Important / Noted / Not used + reasoning
-  4. **Decision summary + confidence**
-- **Ground truth:** Histopathology-confirmed csPCa (ISUP Grade Group >= 2); negatives confirmed by longitudinal PSA follow-up
-- **Provided tool:** MRI prostate zone segmentation
-- **Note:** an earlier draft of the spec asked for a continuous csPCa probability evaluated via AUROC. That has been dropped — the agent's decision is binary. The MRI tool's `cspca_pred` (a model-derived probability) is still surfaced as evidence the agent can weigh and rate.
+- **Output** (`Task1Output`): `biopsy_decision` (bool), `confidence`
+  (`clear` / `borderline` / `uncertain`), `variable_weights` (per
+  variable: `not_used` / `noted` / `important` / `decisive`), and
+  `reasoning` (≥ 40 chars).
+- **Tools**: MRI report, biopsy pathology (returns "no data" when there is
+  no prior biopsy), previous notes, lab results, PSA trend, family
+  history, guideline search.
+- **Ground truth**: histopathology-confirmed csPCa (ISUP Grade Group ≥ 2);
+  negatives confirmed by longitudinal PSA follow-up.
 
-### Task 2: MRI + Biopsy Risk Stratification
+### Task 2 — Treatment decision after biopsy
 
-After biopsy, determine whether a patient qualifies for active surveillance or requires radical prostatectomy by synthesizing MRI findings, biopsy pathology, and PSA-related clinical data (guided by EAU/NCCN standards). The agent must explicitly flag contradictory factors against active surveillance candidacy.
+Choose the management strategy by synthesising MRI findings, biopsy
+pathology, and PSA-related data (guided by EAU/NCCN standards), flagging
+factors that argue against a more conservative path.
 
-- **Input:** Precomputed MRI features (`.h5`) + precomputed biopsy WSI features (`.h5`) + clinical variables (`.csv`: PSA, age, Gleason Grade Group, biopsy burden)
-- **Output:** JSON (~5 KB) containing:
-  1. **Active surveillance eligibility** — binary yes/no (evaluated via AUROC)
-  2. **Reasoning trace** — structured explanation documenting evidence sources and explicitly flagging contradictory factors against active surveillance
-- **Metric:** AUROC
-- **Provided tools:** Automated Gleason grading (biopsy WSI), MRI-based prostate cancer detection
+- **Output** (`Task2Output`): a single `action` — one of
+  `active_surveillance`, `continued_surveillance`, `watchful_waiting`, or
+  `active_treatment` — plus `confidence`, `variable_weights`, and
+  `reasoning`.
+- **Tools**: the same set as Task 1, now backed by a real biopsy
+  pathology report.
 
-### Task 3: Prostatectomy Pathology Prediction
+### Task 3 — Recurrence prognosis after prostatectomy
 
-Predict biochemical recurrence (BCR) risk at 1, 2, and 5 years post-prostatectomy by integrating prostatectomy WSI, biopsy findings, preoperative MRI, and longitudinal PSA kinetics. Cases intentionally include missing modalities to test robustness.
+Predict time to biochemical recurrence (BCR) from prostatectomy
+pathology, biopsy findings, preoperative MRI, and longitudinal PSA. Cases
+intentionally include missing modalities to test robustness.
 
-- **Input:** Precomputed features (`.h5`) for prostatectomy WSI, biopsy WSI, and MRI + clinical variables (`.csv`: age, Gleason Grade Group, surgical margins, extracapsular extension, longitudinal PSA)
-- **Output:** JSON (~5 KB) containing:
-  1. **BCR risk at 1 year** — continuous probability
-  2. **BCR risk at 2 years** — continuous probability
-  3. **BCR risk at 5 years** — continuous probability (evaluated via C-index)
-  4. **Reasoning trace** — structured prognostic explanation identifying dominant recurrence factors and describing how missing or conflicting data was handled
-- **Ground truth:** BCR defined as confirmed PSA rise >= 0.2 ng/mL post-prostatectomy; non-recurrent patients censored
-- **Metric:** C-index
-- **Provided tools:** Standardized preprocessing, automated Gleason grading, MRI cancer detection
+- **Output** (`Task3Output`): `months_to_recurrence` (float) and
+  `reasoning`. No weights or confidence.
+- **Tools**: MRI report, biopsy pathology, surgical (prostatectomy)
+  pathology, previous notes, family history, guideline search. (PSA trend
+  and the lab panel are dropped for this task.)
+- **Ground truth**: BCR defined as a confirmed PSA rise ≥ 0.2 ng/mL
+  post-prostatectomy; non-recurrent patients are censored.
 
-## Dataset Splits
+## Dataset splits
 
 | Split | Task 1 | Task 2 | Task 3 | Source |
 |---|---|---|---|---|
