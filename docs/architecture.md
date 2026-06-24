@@ -39,18 +39,21 @@ The server runs as a stdio subprocess and is framework-agnostic.
 One registry per task, selected automatically from the task number the
 runner is processing (`task1` / `task2` / `task3`):
 
-Both tasks expose the same six tools — the masked "Extended EHR view"
-documents the urologist could reveal — plus guideline search:
+Tasks 1 and 2 expose the same six tools — the masked "Extended EHR view"
+documents the urologist could reveal — plus guideline search. Task 3
+drops the PSA trend and lab panel and adds the surgical (prostatectomy)
+pathology report:
 
-| Tool | Task 1 | Task 2 | Returns |
-|---|---|---|---|
-| `get_psa_trend` | ✓ | ✓ | Prior PSA values as a time series |
-| `get_lab_results` | ✓ | ✓ | Full lab panel |
-| `get_mri_report` | ✓ | ✓ | mpMRI report prose |
-| `get_pathology_report` | ✓ | ✓ | Biopsy report prose (task 1: "no data" when no prior biopsy) |
-| `get_previous_notes` | ✓ | ✓ | Prior GP / urology notes |
-| `get_family_history` | ✓ | ✓ | First-degree PCa history |
-| `search_guidelines` | ✓ | ✓ | Semantic search over EAU corpus |
+| Tool | Task 1 | Task 2 | Task 3 | Returns |
+|---|---|---|---|---|
+| `get_psa_trend` | ✓ | ✓ | — | Prior PSA values as a time series |
+| `get_lab_results` | ✓ | ✓ | — | Full lab panel |
+| `get_mri_report` | ✓ | ✓ | ✓ | mpMRI report prose |
+| `get_pathology_report` | ✓ | ✓ | ✓ | Biopsy report prose (task 1: "no data" when no prior biopsy) |
+| `get_surgical_pathology_report` | — | — | ✓ | Radical-prostatectomy pathology prose |
+| `get_previous_notes` | ✓ | ✓ | ✓ | Prior GP / urology notes |
+| `get_family_history` | ✓ | ✓ | ✓ | First-degree PCa history |
+| `search_guidelines` | ✓ | ✓ | ✓ | Semantic search over EAU corpus |
 
 The structured headline values (PI-RADS, PSA density, volume, csPCa,
 Gleason / ISUP, …) are in `prompt.json` up front, so the tools serve only
@@ -80,11 +83,12 @@ precomputed-data pattern (e.g. an API call), register them directly in
 ### What you can change
 
 You're free to **add** tools, change a tool's `description`, or
-expand its `fields`. Don't rename or remove the existing baseline
-tools — `output/schema.py` (locked) maps each rateable
-reasoning-variable to the tool that backs it (e.g. `pirads →
-get_mri_report`), and renaming a tool silently makes those variables
-un-rateable.
+expand its `fields`. Be aware that `output/schema.py` maps each
+tool-gated reasoning variable to the tool that backs it (e.g.
+`family_history → get_family_history`): renaming or removing that tool
+makes the variable un-rateable for any case. The headline values
+(PI-RADS, PSA density, Gleason / ISUP, …) are in `prompt.json`, so those
+variables are always rateable regardless of tools.
 
 ## Tool use is not audited
 

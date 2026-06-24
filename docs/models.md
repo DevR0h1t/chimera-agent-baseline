@@ -102,9 +102,11 @@ body, so any provider-specific knob (e.g. `reasoning_budget_tokens`,
 `reasoning_content` field that providers like llama.cpp / Qwen3 put on
 the assistant message. The `ChatOpenAICompat` subclass at
 `src/chimera_agent_baseline/models/openai_compat.py` copies it onto
-`AIMessage.additional_kwargs["reasoning_content"]`, and `run.py`
-collects every assistant turn's reasoning into a `thinking_trace[]` in
-the prediction record.
+`AIMessage.additional_kwargs["reasoning_content"]`, so the chain of
+thought survives on the message history. The baseline does not persist
+it — `prediction.json` holds only the validated structured record — but
+it's there on the messages if you want to capture a reasoning trace in
+`run.py`.
 
 ## Experiment overlays
 

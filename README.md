@@ -237,7 +237,7 @@ matches the GC platform — your container must not write to it.
 |---|---|
 | Change the system prompt | `src/chimera_agent_baseline/agent/prompts.py` |
 | Edit the case prompt template | `templates/prompts/agent_prompt.j2` |
-| Add a clinical tool | `src/chimera_agent_baseline/tools/definitions.py` (`TASK1_TOOLS` / `TASK2_TOOLS`) |
+| Add a clinical tool | `src/chimera_agent_baseline/tools/definitions.py` (`TASK1_TOOLS` / `TASK2_TOOLS` / `TASK3_TOOLS`) |
 | Wire an embedding predictor | `src/chimera_agent_baseline/tools/predictor.py` (`run_predictor`) + `agent.predictor.*` |
 | Swap the LLM (vLLM) | `configs/config.yaml` → `model.model_id`, `model.tool_parser` |
 | Swap the LLM (OpenAI-compatible) | `configs/experiment/qwen_local.yaml` (`+experiment=qwen_local`) |
