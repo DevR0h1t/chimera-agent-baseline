@@ -73,21 +73,27 @@ async def run_agent(cfg: DictConfig) -> None:
 
     queries = _filter_queries(load_cases(cfg.paths.input_dir, task=task_int), cfg)
 
+    mcp_args = [
+        "-m",
+        "chimera_agent_baseline.mcp_server",
+        "--data-dir",
+        str(cfg.paths.input_dir),
+        "--resource-dir",
+        str(cfg.paths.resource_dir),
+        "--tool-registry",
+        tool_registry,
+    ]
+    # Optional image-embedding predictor tool (off by default).
+    predictor = cfg.agent.get("predictor")
+    if predictor and predictor.get("enabled"):
+        mcp_args += ["--enable-predictor"]
+
     log.info("Starting MCP server (data_dir=%s, tool_registry=%s)", cfg.paths.input_dir, tool_registry)
     client = MultiServerMCPClient(
         {
             "chimera": {
                 "command": sys.executable,
-                "args": [
-                    "-m",
-                    "chimera_agent_baseline.mcp_server",
-                    "--data-dir",
-                    str(cfg.paths.input_dir),
-                    "--resource-dir",
-                    str(cfg.paths.resource_dir),
-                    "--tool-registry",
-                    tool_registry,
-                ],
+                "args": mcp_args,
                 "transport": "stdio",
             },
         }

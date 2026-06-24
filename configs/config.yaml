@@ -52,6 +52,13 @@ agent:
   # Form-fill node — terminal step that emits the structured submission.
   form_fill:
     max_retries: 3               # validation retries before raising
+  # Optional image-embedding predictor tool (default OFF). When enabled, the
+  # MCP server exposes `get_image_predictor`, which loads ALL of a patient's
+  # features.json embeddings (MRI / biopsy / prostatectomy) via FeatureStore
+  # and returns a compact score — never the raw vectors. Replace `run_predictor`
+  # in tools/predictor.py with your trained head (use one origin or fuse them).
+  predictor:
+    enabled: false
 
 # --- Logging ---
 logging:

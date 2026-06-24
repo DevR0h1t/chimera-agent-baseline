@@ -70,20 +70,21 @@ make gc-test INPUT=data/task2/agent_input                     # task 2
 
 ## Per-case I/O
 
-Each case is a directory under `/input` (read-only) containing two files
-the harness already knows how to read. You write one JSON per case to
-`/output/task<N>/<case_id>/prediction.json`, mirroring the input tree.
+Each case is a directory under `/input` (read-only). You write one JSON per
+case to `/output/task<N>/<case_id>/prediction.json`, mirroring the input tree.
 
 ```
 /input/<case_id>/prompt.json    # patient context rendered into the agent prompt
 /input/<case_id>/clinical.json  # served by the MCP server through tool calls
+/input/<case_id>/features.json  # frozen foundation-model embeddings (optional)
 /output/task<N>/<case_id>/prediction.json   # the prediction (Task1Output / Task2Output / Task3Output)
 ```
 
-The two files mirror the urologist forms: `prompt.json` is the read-only
-"Clinical data" panel the urologist saw up front, and `clinical.json`
-holds the form's masked "Extended EHR view" documents — revealed only on
-request, i.e. via MCP tool calls.
+`prompt.json` + `clinical.json` mirror the urologist forms: `prompt.json` is
+the read-only "Clinical data" panel the urologist saw up front, and
+`clinical.json` holds the form's masked "Extended EHR view" documents —
+revealed only on request, i.e. via MCP tool calls. `features.json` holds
+precomputed image embeddings (see [Feature embeddings](#feature-embeddings)).
 
 ### Inputs
 
@@ -127,6 +128,43 @@ register a new `ToolSpec` in
 `src/chimera_agent_baseline/tools/definitions.py` and append it to
 `TASK1_TOOLS` / `TASK2_TOOLS` — the new tool's `fields` map to one or
 more `clinical.json` keys.
+
+### Feature embeddings
+
+Each patient ships a single `features.json` with frozen foundation-model
+embeddings, separated by origin (JSON attribute). Each origin holds a
+**list of feature vectors** (a list of JSON arrays) — including MRI, which
+is a single-element list — so loading is uniform:
+
+```jsonc
+{
+  "mri":           [[...]],          // one vector,  all tasks
+  "biopsy":        [[...], [...]],   // one or more, tasks 2 & 3
+  "prostatectomy": [[...], [...]]    // one or more, task 3 only
+}
+```
+
+| Origin | Vectors | Tasks |
+|---|---|---|
+| `mri` | one | 1, 2, 3 |
+| `biopsy` | one or more | 2, 3 |
+| `prostatectomy` | one or more | 3 |
+
+The vectors are raw foundation-model output (e.g. 960-d) and are **not**
+meant to enter the LLM context directly — build a predictor or tool on top
+and feed the agent a compact score/label. The **baseline does not consume
+features**; a decoupled loader is provided for participants who want to:
+`chimera_agent_baseline.features.FeatureStore` (indexes `features.json` by
+`case_id`; `get(case_id)` / `get_origin(case_id, origin)`).
+
+An **opt-in predictor tool template** (`tools/predictor.py`, off by default)
+shows the full no-leak wiring end to end. Enable it with
+`agent.predictor.enabled=true` to expose a `get_image_predictor` MCP tool that
+loads the embeddings, runs the model, and returns only a compact score. The
+stub `run_predictor` receives **all** of a patient's embeddings (MRI / biopsy /
+prostatectomy, whichever are present), so you can use one origin or fuse them
+multimodally — replace it with your trained head (e.g. a Cox head over the
+fused features for task 3, a classifier for tasks 1 / 2).
 
 ### Outputs
 
@@ -197,6 +235,7 @@ matches the GC platform — your container must not write to it.
 | Change the system prompt | `src/chimera_agent_baseline/agent/prompts.py` |
 | Edit the case prompt template | `templates/prompts/agent_prompt.j2` |
 | Add a clinical tool | `src/chimera_agent_baseline/tools/definitions.py` (`TASK1_TOOLS` / `TASK2_TOOLS`) |
+| Wire an embedding predictor | `src/chimera_agent_baseline/tools/predictor.py` (`run_predictor`) + `agent.predictor.*` |
 | Swap the LLM (vLLM) | `configs/config.yaml` → `model.model_id`, `model.tool_parser` |
 | Swap the LLM (OpenAI-compatible) | `configs/experiment/qwen_local.yaml` (`+experiment=qwen_local`) |
 | Change the agent loop | `src/chimera_agent_baseline/agent/graph.py` |

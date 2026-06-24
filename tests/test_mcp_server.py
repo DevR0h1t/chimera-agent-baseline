@@ -109,6 +109,16 @@ class TestMCPServer:
         server = create_server(str(tmp_path), tools=TASK3_TOOLS)
         assert server is not None
 
+    def test_predictor_tool_off_by_default(self, tmp_path):
+        _write_case(tmp_path, "PT-x", {"case_id": "PT-x"})
+        server = create_server(str(tmp_path), tools=TASK1_TOOLS)
+        assert "get_image_predictor" not in server._tool_manager._tools
+
+    def test_predictor_tool_registered_when_enabled(self, tmp_path):
+        _write_case(tmp_path, "PT-x", {"case_id": "PT-x"})
+        server = create_server(str(tmp_path), tools=TASK1_TOOLS, predictor_enabled=True)
+        assert "get_image_predictor" in server._tool_manager._tools
+
     def test_surgical_pathology_tool_returns_field(self, tmp_path):
         _write_case(tmp_path, "T3-x", {"case_id": "T3-x", "surgical_pathology_report": "pT3a, margins positive."})
         server = create_server(str(tmp_path), tools=TASK3_TOOLS)

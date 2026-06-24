@@ -94,6 +94,41 @@ evaluated — there is no action log. The MCP tools exist to let the agent
 retrieve the masked EHR documents; using them well is in the
 participant's interest, not a graded artifact.
 
+## Feature embeddings
+
+Each patient may ship a single `features.json` alongside `prompt.json` /
+`clinical.json`, holding frozen foundation-model image embeddings,
+separated by origin (JSON attribute). Each origin is a **list of feature
+vectors** (a list of JSON arrays), uniform across origins:
+
+```jsonc
+{
+  "mri":           [[...]],          // one vector,  all tasks
+  "biopsy":        [[...], [...]],   // one or more, tasks 2 & 3
+  "prostatectomy": [[...], [...]]    // one or more, task 3 only
+}
+```
+
+Vectors are raw foundation-model output (e.g. 960-d) and should **not**
+enter the LLM context directly — build a predictor or tool on top and feed
+the agent a compact score/label. The baseline does not consume features.
+
+`chimera_agent_baseline.features.FeatureStore` is a decoupled loader (no
+ties to the agent graph or MCP server): it indexes `features.json` by
+`case_id` and exposes `get(case_id)` and `get_origin(case_id, origin)`.
+`FEATURE_ORIGINS_BY_TASK` records which origins appear per task.
+
+An **opt-in predictor tool template** (`tools/predictor.py`) shows the full
+no-leak wiring: enabled via `agent.predictor.enabled=true`, the MCP server
+registers a `get_image_predictor` tool that loads embeddings through
+`FeatureStore`, calls `run_predictor`, and returns only a compact score —
+never the raw vectors. `run_predictor` receives **all** origins for the case
+(MRI / biopsy / prostatectomy), so participants can use one or fuse them. It is
+off by default; replace the stub with a trained head to use it.
+
+**Source**: `src/chimera_agent_baseline/features.py`,
+`src/chimera_agent_baseline/tools/predictor.py`.
+
 ## RAG (search_guidelines)
 
 Clinical guidelines are chunked, embedded with
