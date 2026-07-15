@@ -1,13 +1,13 @@
 """Per-case feature-embedding loader.
 
-Each patient may ship a single ``features.json`` alongside ``prompt.json``
-and ``clinical.json``, holding frozen foundation-model embeddings of
+Each patient may ship a single ``prostate-modality-level-neural-representations.json`` alongside ``structured-prompt.json``
+and ``*-clinical-data.json``, holding frozen foundation-model embeddings of
 different origin, separated by JSON attribute::
 
     {
-      "mri":           [[...]],          # one vector   (all tasks)
-      "biopsy":        [[...], [...]],   # one or more  (tasks 2, 3)
-      "prostatectomy": [[...], [...]]    # one or more  (task 3 only)
+      "MRI image":           [[...]],          # one vector   (all tasks)
+      "Biopsy slide":        [[...], [...]],   # one or more  (tasks 2, 3)
+      "Prostatectomy slide": [[...], [...]]    # one or more  (task 3 only)
     }
 
 Each origin maps to a **list of feature vectors** (a list of JSON arrays) so
@@ -29,17 +29,17 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-#: Per-case embeddings filename, alongside ``prompt.json`` / ``clinical.json``.
-FEATURES_FILENAME = "features.json"
+#: Per-case embeddings filename, alongside ``structured-prompt.json`` / ``*-clinical-data.json``.
+FEATURES_FILENAME = "prostate-modality-level-neural-representations.json"
 
 #: Known embedding origins (JSON attributes inside ``features.json``).
-FEATURE_ORIGINS = ("mri", "biopsy", "prostatectomy")
+FEATURE_ORIGINS = ("MRI image", "Biopsy slide", "Prostatectomy slide")
 
 #: Which origins appear for each task (others are absent from the file).
 FEATURE_ORIGINS_BY_TASK: dict[int, tuple[str, ...]] = {
-    1: ("mri",),
-    2: ("mri", "biopsy"),
-    3: ("mri", "biopsy", "prostatectomy"),
+    1: ("MRI image",),
+    2: ("MRI image", "Biopsy slide"),
+    3: ("MRI image", "Biopsy slide", "Prostatectomy slide"),
 }
 
 #: A single feature vector.
@@ -60,7 +60,7 @@ def _as_vector_list(value: list) -> list[Vector]:
 
 
 def _normalise(payload: dict) -> dict[str, list[Vector]]:
-    """Extract the known origins from a ``features.json`` payload."""
+    """Extract the known origins from a ``prostate-modality-level-neural-representations.json`` payload."""
     out: dict[str, list[Vector]] = {}
     for origin in FEATURE_ORIGINS:
         if origin in payload and payload[origin] is not None:
@@ -69,15 +69,15 @@ def _normalise(payload: dict) -> dict[str, list[Vector]]:
 
 
 class FeatureStore:
-    """Loads per-case ``features.json`` files and indexes them by ``case_id``.
+    """Loads per-case ``prostate-modality-level-neural-representations.json`` files and indexes them by ``case_id``.
 
     Layout mirrors the agent input::
 
         data_dir/
-          <case>/features.json   # optional, alongside prompt.json / clinical.json
+          <case>/prostate-modality-level-neural-representations.json   # optional, alongside prompt.json / clinical.json
 
-    Cases without a ``features.json`` are simply absent from the store;
-    origins absent for a case (e.g. ``prostatectomy`` outside task 3) are
+    Cases without a ``prostate-modality-level-neural-representations.json`` are simply absent from the store;
+    origins absent for a case (e.g. ``Prostatectomy slide`` outside task 3) are
     absent from that case's mapping.
     """
 

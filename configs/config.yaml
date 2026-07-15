@@ -22,6 +22,7 @@ paths:
   output_dir: test/output
   resource_dir: resources
   model_dir: model
+  embedding_model_dir: model/embedding_model
 
 # --- Model ---
 # provider=vllm   -- in-process inference via vLLM (the GC container path).
@@ -43,7 +44,7 @@ model:
 # --- Agent ---
 agent:
   max_iterations: 25             # max ReAct loop steps before stopping
-  step_timeout: 120              # seconds per graph step
+  step_timeout: 900              # seconds per graph step #old value 120
   # Which tasks to run. Defaults to all; task dirs missing under data_root are
   # skipped with a warning. Each task auto-selects its tool set and input dir.
   tasks: [1, 2, 3]

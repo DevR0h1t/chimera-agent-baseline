@@ -69,32 +69,31 @@ class TreatmentAction(StrEnum):
 
 
 TASK1_VARIABLES: dict[str, str | None] = {
-    "psa": None,
+    "bx": None,
+    "fh": "get_family_history",
     "age": None,
     "dre": None,
-    "comorbidity": None,
-    "prior_biopsy": None,
-    "pirads": None,
-    "psa_density": None,
-    "prostate_volume": None,
+    "psa": None,
+    "vol": None,
+    "psad": None,
     "cspca": None,
-    "family_history": "get_family_history",
+    "pirads": None,
+    "comorbidity": None,
 }
 
 
 TASK2_VARIABLES: dict[str, str | None] = {
-    "psa": None,
-    "age": None,
     "ct": None,
-    "comorbidity": None,
-    "pirads": None,
-    "psa_density": None,
+    "fh": "get_family_history",
+    "age": None,
+    "psa": None,
+    "psad": None,
     "cspca": None,
-    "bx_gl_prim": None,
-    "bx_gl_sec": None,
-    "bx_gl_tert": None,
+    "pirads": None,
     "bx_isup": None,
-    "family_history": "get_family_history",
+    "bx_gl_sec": None,
+    "bx_gl_prim": None,
+    "comorbidity": None,
 }
 
 

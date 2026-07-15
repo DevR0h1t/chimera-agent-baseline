@@ -33,7 +33,7 @@ the repo, so RAG works once the embedding model above is in place — no PDF
 processing required. To rebuild the corpus from the source PDF instead, see
 [Model Configuration → Embedding model (RAG)](docs/models.md#embedding-model-rag).
 
-Get the per-case agent inputs (`prompt.json` + `clinical.json` per
+Get the per-case agent inputs (`structured-prompt.json` + `*-clinical-data.json` per
 patient, organised by task):
 
 ```bash
@@ -54,7 +54,8 @@ make run RUN_ARGS="agent.limit=5"                            # first 5 cases per
 ```
 
 `make run` walks `data/task<N>/agent_input/` for every task present and writes
-per-case predictions to `test/output/task<N>/<case_id>/prediction.json`.
+the task-specific Grand Challenge output files under `test/output/task<N>/<case_id>/`.
+
 
 On a 24 GB card, lower vLLM's memory fraction if startup OOMs (a desktop session
 or other process can hold a few GB): `make run RUN_ARGS="generation.gpu_memory_utilization=0.80"`.
@@ -64,14 +65,14 @@ Prefer the Docker path below if you don't want vLLM in your local environment.
 
 | Local path | Container path | Contents |
 |---|---|---|
-| `data/task<N>/agent_input/<case>/{prompt,clinical,features}.json` | `/input/task<N>/agent_input/<case>/…` | Per-case agent inputs |
-| `test/output/` | `/output` | Predictions written by the agent |
-| `model/` | `/opt/ml/model` | LLM weights (gitignored) |
-| `resources/` | `/opt/app/resources` | Config, guidelines DB, embedding model |
+| `data/task<N>/agent_input/<case>/{structured-prompt,*-clinical-data,prostate-modality-level-neural-representations}.json` | `/input/task<N>/agent_input/<case>/…` | Per-case agent inputs |
+| `test/output/` | `/output` | Two task-specific output files per patient written by the agent |
+| `model/` | `/opt/ml/model` | LLM weights, including `gemma-4-E2B-it/` and `embedding_model/` |
+| `resources/` | `/opt/app/resources` | Config, guidelines DB |
 
 The input root (`data/` locally, `/input` in the container) holds the same
 `task<N>/agent_input/<case>/` tree for every task; the agent runs all tasks
-present. The participant ships `prompt.json`; `clinical.json` is read only by
+present. The participant ships `structured-prompt.json`; `*-clinical-data.json` is read only by
 the MCP server and reaches the agent through tool calls.
 
 To test in the GC Docker container (mounts the whole data root, runs all tasks):
@@ -83,28 +84,29 @@ make gc-test                                                  # all tasks under 
 
 ## Per-case I/O
 
-Each case is a directory under `/input/task<N>/agent_input/` (read-only). You
-write one JSON per case to `/output/task<N>/<case_id>/prediction.json`,
-mirroring the input tree.
+Each case is a directory under `/input/task<N>/agent_input/` (read-only).
+The agent writes two task-specific JSON output files for each case under
+`/output/task<N>/<case_id>/`.
 
 ```
-/input/task<N>/agent_input/<case_id>/prompt.json    # patient context rendered into the agent prompt
-/input/task<N>/agent_input/<case_id>/clinical.json  # served by the MCP server through tool calls
-/input/task<N>/agent_input/<case_id>/features.json  # frozen foundation-model embeddings (optional)
-/output/task<N>/<case_id>/prediction.json           # the prediction (Task1/2/3 Output)
+/input/task<N>/agent_input/<case_id>/structured-prompt.json    # patient context rendered into the agent prompt
+/input/task<N>/agent_input/<case_id>/*-clinical-data.json      # served by the MCP server through tool calls
+/input/task<N>/agent_input/<case_id>/prostate-modality-level-neural-representations.json  # frozen foundation-model embeddings (optional)
+/output/task<N>/<case_id>/  # two task-specific output files written by the agent; see Outputs below for details
 ```
 
-`prompt.json` + `clinical.json` mirror the urologist forms: `prompt.json` is
+`structured-prompt.json` + `*-clinical-data.json` mirror the urologist forms: `structured-prompt.json` is
 the read-only "Clinical data" panel the urologist saw up front, and
-`clinical.json` holds the form's masked "Extended EHR view" documents —
-revealed only on request, i.e. via MCP tool calls. `features.json` holds
+`*-clinical-data.json` holds the form's masked "Extended EHR view" documents —
+revealed only on request, i.e. via MCP tool calls. `prostate-modality-level-neural-representations.json` holds
 precomputed image embeddings (see [Feature embeddings](#feature-embeddings)).
+
 
 ### Inputs
 
-`prompt.json` — the flat structured record the agent always sees (no tool
+`structured-prompt.json` — the flat structured record the agent always sees (no tool
 call needed): identifiers, encounter, headline values, and the structured
-clinical panel. Same shape both tasks; task 2 adds the biopsy fields.
+clinical panel. Tasks 1 and 2 use the same general structure; Task 2 adds the biopsy fields. Task 3 uses a simplified structure described below.
 
 | Key | Type | Tasks | Notes |
 |---|---|---|---|
@@ -123,60 +125,57 @@ clinical panel. Same shape both tasks; task 2 adds the biopsy fields.
 There is no `query` field — the task question is fixed per task in the
 prompt template (`templates/prompts/agent_prompt.j2`).
 
-`clinical.json` — the documents the MCP server returns when the agent
-calls a tool. The agent only sees these if it actually invokes the
+`*-clinical-data.json` — the task-specific clinical data file used by the MCP server when the agent calls a tool. The agent only sees these if it actually invokes the
 matching tool (see [docs/architecture.md](docs/architecture.md)).
 
 | Key | Type | Tasks | Served by |
 |---|---|---|---|
-| `case_id` | str | 1, 2 | echoed by every tool |
-| `radiology_report` | str | 1, 2 | `get_mri_report` |
-| `pathology_report` | str | 2 | `get_pathology_report` (task 1: no prior pathology → "no data") |
-| `previous_notes` | list | 1, 2 | `get_previous_notes` |
+| `radiology_report` | str | 1, 2, 3 | `get_mri_report` |
+| `pathology_report` | str | 2, 3 | `get_pathology_report` (task 1: no prior pathology → "no data") |
+| `surgical_pathology_report` | str | 3 | `get_surgical_pathology_report` |
+| `previous_notes` | list | 1, 2, 3 | `get_previous_notes` |
 | `laboratory_results` | list | 1, 2 | `get_lab_results` |
 | `psa_trend` | list | 1, 2 | `get_psa_trend` |
-| `family_history` | str | 1, 2 | `get_family_history` |
+| `family_history` | str | 1, 2, 3 | `get_family_history` |
 
-Both tasks expose the same six tools. To **add** a clinical tool,
-register a new `ToolSpec` in
-`src/chimera_agent_baseline/tools/definitions.py` and append it to
-`TASK1_TOOLS` / `TASK2_TOOLS` — the new tool's `fields` map to one or
-more `clinical.json` keys.
+Tasks 1 and 2 share the same six tools, while Task 3 uses five tools. To **add** a clinical tool, register a new `ToolSpec` in
+`src/chimera_agent_baseline/tools/definitions.py` and append it to the
+appropriate `TASK1_TOOLS`, `TASK2_TOOLS`, or `TASK3_TOOLS` registry. The new
+tool's `fields` map to one or more `*-clinical-data.json` keys.
 
 ### Feature embeddings
 
-Each patient ships a single `features.json` with frozen foundation-model
+Each patient ships a single `prostate-modality-level-neural-representations.json` with frozen foundation-model
 embeddings, separated by origin (JSON attribute). Each origin holds a
 **list of feature vectors** (a list of JSON arrays) — including MRI, which
 is a single-element list — so loading is uniform:
 
 ```jsonc
 {
-  "mri":           [[...]],          // one vector,  all tasks
-  "biopsy":        [[...], [...]],   // one or more, tasks 2 & 3
-  "prostatectomy": [[...], [...]]    // one or more, task 3 only
+  "MRI image":           [[...]],                  // one vector, all tasks; otherwise []
+  "Biopsy slide":        [[...], [...], [...]],   // one to three vectors, tasks 2 & 3; otherwise []
+  "Prostatectomy slide": [[...], [...], [...]]    // one to three vectors, task 3 only; otherwise []
 }
 ```
-
 | Origin | Vectors | Tasks |
 |---|---|---|
-| `mri` | one | 1, 2, 3 |
-| `biopsy` | one or more | 2, 3 |
-| `prostatectomy` | one or more | 3 |
+| `MRI image` | one feature vector | 1, 2, 3 |
+| `Biopsy slide` | one to three feature vectors | 2, 3 |
+| `Prostatectomy slide` | one to three feature vectors | 3 |
 
 The vectors are raw foundation-model output (e.g. 960-d) and are **not**
 meant to enter the LLM context directly — build a predictor or tool on top
 and feed the agent a compact score/label. The **baseline does not consume
 features**; a decoupled loader is provided for participants who want to:
-`chimera_agent_baseline.features.FeatureStore` (indexes `features.json` by
+`chimera_agent_baseline.features.FeatureStore` (indexes `prostate-modality-level-neural-representations.json` by
 `case_id`; `get(case_id)` / `get_origin(case_id, origin)`).
 
 An **opt-in predictor tool template** (`tools/predictor.py`, off by default)
 shows the full no-leak wiring end to end. Enable it with
 `agent.predictor.enabled=true` to expose a `get_image_predictor` MCP tool that
 loads the embeddings, runs the model, and returns only a compact score. The
-stub `run_predictor` receives **all** of a patient's embeddings (MRI / biopsy /
-prostatectomy, whichever are present), so you can use one origin or fuse them
+stub `run_predictor` receives **all** of a patient's embeddings (MRI / Biopsy slide /
+Prostatectomy slide, whichever are present), so you can use one origin or fuse them
 multimodally — replace it with your trained head (e.g. a Cox head over the
 fused features for task 3, a classifier for tasks 1 / 2).
 
@@ -184,39 +183,107 @@ fused features for task 3, a classifier for tasks 1 / 2).
 
 The structured submission contract is the Pydantic models in
 `src/chimera_agent_baseline/output/schema.py` (`Task1Output`,
-`Task2Output`, `Task3Output`). Each is a single JSON file per case;
+`Task2Output`, `Task3Output`). Each case produces two task-specific JSON output files;
 outputs that don't validate are rejected. Enum tokens are lowercase, to
 match the urologist forms.
 
+#### Task 1: Biopsy decision
+
+Each Task 1 case produces two JSON files under
+`/output/task1/<case_id>/`.
+
 ```jsonc
-// /output/task1/PT-XXXX/prediction.json
+// /output/task1/PT-XXXX/prostate-biopsy-decision.json
+
+"yes" // yes | no
+```
+
+```jsonc
+// /output/task1/PT-XXXX/prostate-biopsy-decision-reasoning.json
+
 {
-  "case_id": "PT-XXXX",
-  "task": 1,
-  "biopsy_decision": true,                 // bool
-  "confidence": "borderline",              // clear | borderline | uncertain
-  "variable_weights": {                    // one per TASK1_VARIABLES key
-    "psa": "important",                    // not_used | noted | important | decisive
-    "pirads": "decisive"
-    // ...
+  "confidence": "clear", // clear | borderline | uncertain
+
+  "variable_weights": {
+    "age": "important",       // not_used | noted | important | decisive
+    "fh": "noted",            // not_used | noted | important | decisive
+    "cspca": "not_used",      // not_used | noted | important | decisive
+    "pirads": "important",    // not_used | noted | important | decisive
+    "vol": "noted",           // not_used | noted | important | decisive
+    "psa": "noted",           // not_used | noted | important | decisive
+    "comorbidity": "noted",   // not_used | noted | important | decisive
+    "psad": "not_used",       // not_used | noted | important | decisive
+    "dre": "noted",           // not_used | noted | important | decisive
+    "bx": "decisive"          // not_used | noted | important | decisive
   },
-  "reasoning": "..."                       // ≥40 chars, names 2-4 driving factors
+
+  "free_text": "The decision is driven by three critical factors: the PI-RADS 5 score, the extremely high csPCa predicted probability (0.96), and the frankly elevated PSA level (187.0 ng/mL) with a rapid upward trend." // free-text explanation of the main factors driving the decision
 }
 ```
 
-Task 2 replaces `biopsy_decision` with a single `action` — one of
-`active_surveillance` | `continued_surveillance` | `watchful_waiting` |
-`active_treatment` — and uses the task-2 variable set. Task 3 is a
-numeric prognosis: `months_to_recurrence` (float) + `reasoning` only (no
-weights / confidence).
+#### Task 2: Treatment decision
 
-Task 3 (recurrence prognosis) uses a much-simplified `prompt.json` —
-`case_id`, `task`, `age`, `psa`, and `dre` (the free-text physical
-examination) — and a 5-tool `clinical.json`: `radiology_report`,
-`pathology_report` (biopsy), `surgical_pathology_report`,
-`previous_notes`, `family_history`. The loader, tools, prompt template,
-and output contract all handle task 3; only the task-3 case data is not
-yet shipped.
+Each Task 2 case produces two JSON files under
+`/output/task2/<case_id>/`.
+
+```jsonc
+// /output/task2/PT-XXXX/prostate-treatment-decision.json
+
+"active_surveillance" // active_surveillance | continued_surveillance | watchful_waiting | active_treatment
+```
+
+```jsonc
+// /output/task2/PT-XXXX/prostate-treatment-decision-reasoning.json
+
+{
+  "confidence": "clear", // clear | borderline | uncertain
+
+  "variable_weights": {
+    "bx_gl_prim": "important",  // not_used | noted | important | decisive
+    "pirads": "decisive",       // not_used | noted | important | decisive
+    "bx_isup": "decisive",      // not_used | noted | important | decisive
+    "ct": "important",          // not_used | noted | important | decisive
+    "fh": "noted",              // not_used | noted | important | decisive
+    "comorbidity": "noted",     // not_used | noted | important | decisive
+    "psa": "important",         // not_used | noted | important | decisive
+    "bx_gl_sec": "important",   // not_used | noted | important | decisive
+    "age": "not_used",          // not_used | noted | important | decisive
+    "psad": "important",        // not_used | noted | important | decisive
+    "cspca": "not_used"         // not_used | noted | important | decisive
+  },
+
+  "free_text": "Patient with GG 1 on active surveillance, negative follow-up imaging." // free-text explanation of the main factors driving the treatment decision
+}
+```
+
+#### Task 3: Time to recurrence or last follow-up
+
+Each Task 3 case produces two JSON files under `/output/task3/<case_id>/`.
+
+```jsonc
+// /output/task3/PT-XXXX/prostate-time-to-recurrence-or-last-follow-up.json
+
+{
+  "months_to_recurrence": 65.7, // predicted time in months
+  "event": 0                     // 0 | 1
+}
+```
+
+```jsonc
+// /output/task3/PT-XXXX/prostate-time-to-recurrence-or-last-follow-up-reasoning.json
+
+"The estimated time is based on the patient's clinical history, PSA measurements, imaging findings, and available pathology reports."
+```
+Task 3 (recurrence prognosis) uses a simplified
+`structured-prompt.json` containing `case_id`, `task`, `age`, `psa`, `dre`,
+and `active_treatment_prior_to_surgery`.
+
+For each patient, the clinical information for Task 3 is stored in
+`prostate-time-to-recurrence-or-last-follow-up-clinical-data.json` and is
+made available to the agent through five clinical tools. The file contains
+`radiology_report`, `pathology_report` (biopsy),
+`surgical_pathology_report`, `previous_notes`, and `family_history`.
+Fields may be `null` when the corresponding information is unavailable.
 
 ### Docker invocation
 
@@ -233,6 +300,20 @@ docker run --rm --gpus all \
 `make gc-test` is exactly this with the housekeeping (cleans
 `test/output/`, sets perms, tags the image). The `:ro` on `/input`
 matches the GC platform — your container must not write to it.
+
+### Grand Challenge platform execution
+
+The Docker command above tests the baseline with the full internal task tree
+mounted at `/input`. In this local/full-tree mode, inputs are expected under
+`/input/task<N>/agent_input/<case_id>/`, and outputs are written under
+`/output/task<N>/<case_id>/`.
+
+On the Grand Challenge platform, the algorithm is executed for one case at a
+time. The platform provides `inputs.json` and the task-specific JSON files
+directly under `/input`. The adapted `inference.py` reads these flat GC input
+files, creates the internal `task<N>/agent_input/<case_id>/` structure
+temporarily, runs the baseline, and copies the required task-specific output
+JSON files back to `/output`.
 
 ## Documentation
 

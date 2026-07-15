@@ -2,8 +2,8 @@
 
 Hydra-driven runner. Walks the hierarchical input tree
 ``<data_root>/task<N>/agent_input/<case>/`` and runs the LangGraph ReAct +
-form-fill graph on every case, one task at a time, writing
-``<output_dir>/task<N>/<case>/prediction.json``.
+form-fill graph on every case, one task at a time, writing task-specific Grand Challenge output files under
+``<output_dir>/task<N>/<case>/``.
 
 By default every task present under ``data_root`` is run (``agent.tasks``);
 missing task dirs are skipped. The model is loaded once and reused across
@@ -102,6 +102,52 @@ def _mcp_args(cfg: DictConfig, input_dir: Path, registry: str) -> list[str]:
         args += ["--enable-predictor"]
     return args
 
+def _write_json(path: Path, content: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(content, indent=2))
+
+
+def _write_task_outputs(case_dir: Path, task: int, structured: dict[str, Any]) -> None:
+    """Write GC-style output files for one case."""
+
+    if task == 1:
+        decision = "yes" if structured["biopsy_decision"] else "no"
+        reasoning = {
+            "free_text": structured["reasoning"],
+            "confidence": structured["confidence"],
+            "variable_weights": structured["variable_weights"],
+        }
+
+        _write_json(case_dir / "prostate-biospy-decision.json", decision)
+        _write_json(case_dir / "prostate-biospy-decision-reasoning.json", reasoning)
+        return
+
+    if task == 2:
+        reasoning = {
+            "free_text": structured["reasoning"],
+            "confidence": structured["confidence"],
+            "variable_weights": structured["variable_weights"],
+        }
+
+        _write_json(case_dir / "prostate-treatment-decision.json", structured["action"])
+        _write_json(case_dir / "prostate-treatment-decision-reasoning.json", reasoning)
+        return
+
+    if task == 3:
+        _write_json(
+            case_dir / "prostate-time-to-recurrence-or-last-follow-up.json",
+            {
+                "event": structured.get("event", 0),
+                "months_to_recurrence": structured["months_to_recurrence"],
+            },
+        )
+        _write_json(
+            case_dir / "prostate-time-to-recurrence-or-last-follow-up-reasoning.json",
+            structured["reasoning"],
+        )
+        return
+
+    raise ValueError(f"Unknown task: {task}")
 
 async def _run_task(cfg: DictConfig, task_int: int, input_dir: Path, model, system_prompt: str) -> int:
     """Run every case for one task; returns the number of predictions written."""
@@ -128,8 +174,8 @@ async def _run_task(cfg: DictConfig, task_int: int, input_dir: Path, model, syst
         step_timeout=cfg.agent.step_timeout,
         form_fill_max_retries=cfg.agent.form_fill.max_retries,
     )
-
-    # Output mirrors the agent-input hierarchy: <output_dir>/task<N>/<case_id>/prediction.json
+    # Output mirrors the agent-input hierarchy:
+    # <output_dir>/task<N>/<case_id>/<task-specific-output-files>.json
     task_dir = Path(cfg.paths.output_dir) / f"task{task_int}"
 
     n_done = 0
@@ -153,11 +199,11 @@ async def _run_task(cfg: DictConfig, task_int: int, input_dir: Path, model, syst
         # retry fails, so the structured_response here is already valid.
         structured = result["structured_response"]
 
-        # Single output file per patient, in a per-case folder mirroring the
-        # agent input. The file is exactly the validated structured record.
+        # GC-style output files per patient.
         case_dir = task_dir / case_id
-        case_dir.mkdir(parents=True, exist_ok=True)
-        (case_dir / "prediction.json").write_text(json.dumps(structured, indent=2))
+        #case_dir.mkdir(parents=True, exist_ok=True)
+        #(case_dir / "prediction.json").write_text(json.dumps(structured, indent=2))
+        _write_task_outputs(case_dir, task_int, structured)
         n_done += 1
 
     log.info("Task %d: wrote %d predictions under %s", task_int, n_done, task_dir)
@@ -182,7 +228,8 @@ async def run_agent(cfg: DictConfig) -> None:
 def main(cfg: DictConfig) -> None:
     setup_logging(cfg.logging.level)
 
-    embed_svc = start_embedding_service(cfg.paths.resource_dir)
+    #embed_svc = start_embedding_service(cfg.paths.resource_dir)
+    embed_svc = start_embedding_service(cfg.paths.embedding_model_dir)
     try:
         asyncio.run(run_agent(cfg))
     finally:

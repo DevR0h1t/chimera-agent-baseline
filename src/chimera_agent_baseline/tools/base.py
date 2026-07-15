@@ -54,8 +54,25 @@ class ToolSpec:
 
 
 #: Per-case clinical data filename.
-CASE_DATA_FILENAME = "clinical.json"
+#CASE_DATA_FILENAME = "clinical.json"
 
+CASE_DATA_FILENAMES_BY_TASK = {
+    1: "prostate-biopsy-decision-clinical-data.json",
+    2: "prostate-treatment-decision-clinical-data.json",
+    3: "prostate-time-to-recurrence-or-last-follow-up-clinical-data.json",
+}
+
+def infer_task_from_data_dir(data_dir: Path) -> int:
+    parts = {p.lower() for p in data_dir.parts}
+
+    if "task1" in parts or "task_1" in parts:
+        return 1
+    if "task2" in parts or "task_2" in parts:
+        return 2
+    if "task3" in parts or "task_3" in parts:
+        return 3
+
+    raise ValueError(f"Could not infer task from data_dir: {data_dir}")
 
 class CaseDataStore:
     """Loads per-patient ``clinical.json`` files and indexes cases by ``case_id``.
@@ -77,9 +94,17 @@ class CaseDataStore:
         if not data_dir.is_dir():
             raise FileNotFoundError(f"Data dir {data_dir} is not a directory")
 
-        case_subdirs = sorted(p for p in data_dir.iterdir() if p.is_dir() and (p / CASE_DATA_FILENAME).exists())
+        #case_subdirs = sorted(p for p in data_dir.iterdir() if p.is_dir() and (p / CASE_DATA_FILENAME).exists())
+        task = infer_task_from_data_dir(data_dir)
+        case_data_filename = CASE_DATA_FILENAMES_BY_TASK[task]
+
+        case_subdirs = sorted(
+            p for p in data_dir.iterdir()
+            if p.is_dir() and (p / case_data_filename).exists()
+        )
         for sub in case_subdirs:
-            case_file = sub / CASE_DATA_FILENAME
+            #case_file = sub / CASE_DATA_FILENAME
+            case_file = sub / case_data_filename
             try:
                 case = json.loads(case_file.read_text())
             except json.JSONDecodeError as e:

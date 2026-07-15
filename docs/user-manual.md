@@ -50,7 +50,7 @@ src/chimera_agent_baseline/
 │   ├── definitions.py        TASK1_TOOLS / TASK2_TOOLS / TASK3_TOOLS (add custom tools here)
 │   └── predictor.py          Optional image-embedding predictor tool (off by default)
 ├── features.py               FeatureStore — loads per-case features.json embeddings
-├── case_loader.py            Reads <case>/prompt.json into agent queries
+├── case_loader.py            Reads <case>/structured-prompt.json into agent queries
 ├── mcp_server.py             MCP server (per-task tool registries)
 ├── rag.py                    Guidelines search (ChromaDB + embeddings)
 ├── run.py                    Local Hydra entry-point
@@ -60,7 +60,7 @@ configs/config.yaml           Defaults (paths, model, generation, agent)
 configs/experiment/           Overlays via +experiment=<name>
 templates/prompts/            Jinja templates for the agent prompt
 resources/                    Guidelines DB + embedding model + GC config copy
-data/task{1,2,3}/agent_input/<case>/{prompt,clinical,features}.json  Per-case inputs
+data/task{1,2,3}/agent_input/<case>/{structured-prompt,*-clinical-data,prostate-modality-level-neural-representations}.json  Per-case inputs
 inference.py                  Grand Challenge container entrypoint
 ```
 

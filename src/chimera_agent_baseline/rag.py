@@ -98,14 +98,24 @@ class EmbeddingService:
             SOCKET_PATH.unlink()
 
 
-def start_embedding_service(resource_dir: str | Path) -> EmbeddingService | None:
-    """Start the embedding service if the model is available."""
-    model_path = Path(resource_dir) / "embedding_model"
+#def start_embedding_service(resource_dir: str | Path) -> EmbeddingService | None:
+    #"""Start the embedding service if the model is available."""
+    #model_path = Path(resource_dir) / "embedding_model"
+    #if not model_path.exists():
+        #log.info("No embedding model at %s — skipping embedding service", model_path)
+        #return None
+    #return EmbeddingService(str(model_path))
+
+# The embedding model is passed as its own path, not assumed to live under
+# resource_dir. In GC, resource_dir contains guidelines_db, while the embedding
+# model can be provided separately under /opt/ml/model/embedding_model.
+def start_embedding_service(embedding_model_dir: str | Path) -> EmbeddingService | None:
+    """Start the embedding service if the embedding model is available."""
+    model_path = Path(embedding_model_dir)
     if not model_path.exists():
         log.info("No embedding model at %s — skipping embedding service", model_path)
         return None
     return EmbeddingService(str(model_path))
-
 
 # ---------------------------------------------------------------------------
 # Socket client — used by GuidelinesSearch inside MCP subprocesses

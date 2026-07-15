@@ -7,7 +7,9 @@ name = "chimera_agent_baseline"
 version = "0.1.0"
 description = "The Baseline Agent for the CHIMERA-Agent challenge"
 readme = "README.md"
-requires-python = ">=3.12"
+#requires-python = ">=3.12"
+# Python 3.11 matches the CUDA 12.6 Grand Challenge base image.
+requires-python = ">=3.11"         
 authors = [{ name = "Sander Moonemans" }]
 dependencies = [
     "langgraph>=1.1,<2",
