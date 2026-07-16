@@ -9,7 +9,7 @@ DOCKER_IMAGE_TAG="example_algorithm_debug"
 DOCKER_NOOP_VOLUME="${DOCKER_IMAGE_TAG}-volume"
 
 INPUT_DIR="${SCRIPT_DIR}/test/input"
-OUTPUT_DIR="${SCRIPT_DIR}/test/output"
+OUTPUT_DIR="${SCRIPT_DIR}/test/outputs"
 
 echo "=+= (Re)build the container"
 source "${SCRIPT_DIR}/do_build.sh"
@@ -30,59 +30,34 @@ cleanup() {
     docker volume rm "$DOCKER_NOOP_VOLUME" > /dev/null
 }
 
-# This allows for the Docker user to read
-chmod -R -f o+rX "$INPUT_DIR" "${SCRIPT_DIR}/model"
+# This allows for the Docker user to read (best-effort: on some mounted
+# filesystems the host user does not own these files and chmod is not permitted,
+# so never let it abort the run under `set -e`).
+chmod -R -f o+rX "$INPUT_DIR" "${SCRIPT_DIR}/model" || true
 
-
-if [ -d "${OUTPUT_DIR}/interf0" ]; then
-  # This allows for the Docker user to write
-  chmod -f o+rwX "${OUTPUT_DIR}/interf0"
-
-  echo "=+= Cleaning up any earlier output"
-  # Use the container itself to circumvent ownership problems
-  docker run --rm \
-      --platform=linux/amd64 \
-      --quiet \
-      --volume "${OUTPUT_DIR}/interf0":/output \
-      --entrypoint /bin/sh \
-      $DOCKER_IMAGE_TAG \
-      -c "rm -rf /output/* || true"
-else
-  mkdir -p -m o+rwX "${OUTPUT_DIR}/interf0"
+# Each case is a directory holding an inputs.json (e.g. interf0/case1). Grand
+# Challenge runs one job per case, so we mirror that: one container run per
+# case, each seeing a flat /input and writing its result sockets to /output.
+mapfile -t CASE_DIRS < <(cd "$INPUT_DIR" && find . -name inputs.json -printf '%h\n' | sed 's|^\./||' | sort)
+if [ "${#CASE_DIRS[@]}" -eq 0 ]; then
+  echo "=+= No cases (inputs.json) found under ${INPUT_DIR}" >&2
+  exit 1
 fi
 
-if [ -d "${OUTPUT_DIR}/interf1" ]; then
-  # This allows for the Docker user to write
-  chmod -f o+rwX "${OUTPUT_DIR}/interf1"
+# Fresh output tree (clean via the container to sidestep ownership problems).
+if [ -d "$OUTPUT_DIR" ]; then
+  chmod -R -f o+rwX "$OUTPUT_DIR" || true
 
   echo "=+= Cleaning up any earlier output"
-  # Use the container itself to circumvent ownership problems
   docker run --rm \
       --platform=linux/amd64 \
       --quiet \
-      --volume "${OUTPUT_DIR}/interf1":/output \
+      --volume "$OUTPUT_DIR":/output \
       --entrypoint /bin/sh \
       $DOCKER_IMAGE_TAG \
       -c "rm -rf /output/* || true"
 else
-  mkdir -p -m o+rwX "${OUTPUT_DIR}/interf1"
-fi
-
-if [ -d "${OUTPUT_DIR}/interf2" ]; then
-  # This allows for the Docker user to write
-  chmod -f o+rwX "${OUTPUT_DIR}/interf2"
-
-  echo "=+= Cleaning up any earlier output"
-  # Use the container itself to circumvent ownership problems
-  docker run --rm \
-      --platform=linux/amd64 \
-      --quiet \
-      --volume "${OUTPUT_DIR}/interf2":/output \
-      --entrypoint /bin/sh \
-      $DOCKER_IMAGE_TAG \
-      -c "rm -rf /output/* || true"
-else
-  mkdir -p -m o+rwX "${OUTPUT_DIR}/interf2"
+  mkdir -p -m o+rwX "$OUTPUT_DIR"
 fi
 
 
@@ -91,9 +66,12 @@ docker volume create "$DOCKER_NOOP_VOLUME" > /dev/null
 trap cleanup EXIT
 
 run_docker_forward_pass() {
-    local interface_dir="$1"
+    local case_dir="$1"
 
-    echo "=+= Doing a forward pass on ${interface_dir}"
+    echo "=+= Doing a forward pass on ${case_dir}"
+
+    # Per-case output dir must exist and be writable by the container user.
+    mkdir -p -m o+rwX "${OUTPUT_DIR}/${case_dir}"
 
     ## Note the extra arguments that are passed here:
     # '--network none'
@@ -104,25 +82,45 @@ run_docker_forward_pass() {
     #   is added because on Grand Challenge this directory cannot be used to store permanent files
     # '--volume ../model:/opt/ml/model/":ro'
     #   is added to provide access to the (optional) tarball-upload locally
-    docker run --rm --gpus all \
-        --platform=linux/amd64 \
-        --network none \
-        --volume "${INPUT_DIR}/${interface_dir}":/input:ro \
-        --volume "${OUTPUT_DIR}/${interface_dir}":/output \
-        --volume "$DOCKER_NOOP_VOLUME":/tmp \
-        --volume "${SCRIPT_DIR}/model":/opt/ml/model:ro \
-        "$DOCKER_IMAGE_TAG"
+  docker run --rm --gpus all \
+      --platform=linux/amd64 \
+      --network none \
+      --volume "${INPUT_DIR}/${case_dir}":/input:ro \
+      --volume "${OUTPUT_DIR}/${case_dir}":/output \
+      --volume "$DOCKER_NOOP_VOLUME":/tmp \
+      --volume "${SCRIPT_DIR}/model":/opt/ml/model:ro \
+      "$DOCKER_IMAGE_TAG"
 
-  echo "=+= Wrote results to ${OUTPUT_DIR}/${interface_dir}"
+  echo "=+= Wrote results to ${OUTPUT_DIR}/${case_dir}"
 }
 
 
-run_docker_forward_pass "interf0"
+for case_dir in "${CASE_DIRS[@]}"; do
+  run_docker_forward_pass "$case_dir"
+done
 
-run_docker_forward_pass "interf1"
+# Make the container-written outputs host-readable, then rebuild the combined
+# predictions.json exactly as the Grand Challenge platform would across jobs.
+docker run --rm \
+    --platform=linux/amd64 \
+    --quiet \
+    --volume "$OUTPUT_DIR":/output \
+    --entrypoint /bin/sh \
+    $DOCKER_IMAGE_TAG \
+    -c "chmod -R -f o+rwX /output/* || true"
 
-run_docker_forward_pass "interf2"
-
+echo "=+= Aggregating predictions.json"
+# Run the aggregator with the container's Python (the host python3 may predate
+# 3.7); it reads /input + the per-case /output sockets and writes predictions.json.
+docker run --rm \
+    --platform=linux/amd64 \
+    --quiet \
+    --volume "${SCRIPT_DIR}/scripts":/opt/app/scripts:ro \
+    --volume "${INPUT_DIR}":/input:ro \
+    --volume "${OUTPUT_DIR}":/output \
+    --entrypoint python3 \
+    "$DOCKER_IMAGE_TAG" \
+    /opt/app/scripts/aggregate_predictions.py --input /input --output /output
 
 
 echo "=+= Save this image for uploading via ./do_save.sh"
