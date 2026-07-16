@@ -41,6 +41,9 @@ class AgentState(TypedDict, total=False):
     * ``task`` — 1 (biopsy decision) or 2 (treatment decision). Drives
       which set of reasoning variables / Pydantic model is used.
     * ``case_id`` — included in the structured response.
+    * ``patient`` — raw per-case fields (``psa``, ``age``) read from
+      ``prompt.json`` by the case loader, used by ``form_fill`` to
+      populate the output record's ``patient`` object.
     * ``structured_response`` — populated by ``form_fill`` and read by
       :mod:`chimera_agent_baseline.run` after graph completion.
     * ``form_fill_warnings`` — diagnostics (validation retries, post-hoc
@@ -50,6 +53,7 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     task: int
     case_id: str
+    patient: dict[str, Any]
     structured_response: dict[str, Any]
     form_fill_warnings: list[str]
 

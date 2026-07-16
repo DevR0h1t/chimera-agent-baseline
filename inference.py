@@ -1,466 +1,243 @@
-"""Grand Challenge entrypoint.
+"""Grand Challenge entrypoint for the CHIMERA agentic baseline.
 
-Reads inputs from ``/input`` (the same ``task<N>/agent_input/<case>/``
-hierarchy used locally), runs every task present, and writes structured
-predictions to ``/output/task<N>/<case>/prediction.json``. Thin wrapper around
-:func:`chimera_agent_baseline.run.run_agent` that loads the same
-``configs/config.yaml`` Hydra reads locally and overrides the path fields to
-the GC container's mount points.
+On Grand Challenge one container invocation handles a **single case through a
+single interface**: the platform drops the input sockets as flat JSON files in
+``/input`` (described by ``/input/inputs.json``) and expects the result sockets
+as flat JSON files in ``/output``. The platform then aggregates every job's
+inputs and outputs into a single ``predictions.json`` (rebuilt locally after the
+per-case runs by ``scripts/aggregate_predictions.py``).
 
-For local development, use ``make run`` instead.
+The agent package (``chimera_agent_baseline``) is written around a per-case
+directory tree ``task<N>/agent_input/<case>/{prompt,clinical,features}.json``.
+This entrypoint is the thin adapter between the two worlds:
+
+1. Read ``inputs.json`` and detect which interface (task) is being run from the
+   clinical-data socket slug.
+2. Materialise the flat GC sockets into a temporary
+   ``<tmp>/task<N>/agent_input/<case>/`` tree the package understands:
+     * ``structured-prompt``                              -> ``prompt.json``
+     * ``prostate-<task>-...-clinical-data``              -> ``clinical.json``
+     * ``prostate-modality-level-neural-representations`` -> ``features.json``
+3. Run the same :func:`run_agent` used locally (model + MCP tools + LangGraph
+   ReAct loop + form-fill), scoped to the single task.
+4. Read back the validated prediction and write the GC result sockets flat to
+   ``/output`` — a decision value + a reasoning value per interface, in the
+   task-specific shapes below. The reasoning value is an object that also
+   carries the tool ``reveal_sequence``, so the combined ``predictions.json``
+   (rebuilt by ``scripts/aggregate_predictions.py``) surfaces it inside the
+   reasoning socket.
 """
-
-"""
-The following is a simple example algorithm.
-
-It is meant to run within a container.
-
-To run the container locally, you can call the following bash script:
-
-  ./do_test_run.sh
-
-This will start the inference and reads from ./test/input and writes to ./test/output
-
-To save the container and prep it for upload to Grand-Challenge.org you can call:
-
-  ./do_save.sh
-
-Any container that shows the same behaviour will do, this is purely an example of how one COULD do it.
-
-Reference the documentation to get details on the runtime environment on the platform:
-https://grand-challenge.org/documentation/runtime-environment/
-
-Happy programming!
-"""
-
-import json
-from pathlib import Path
-
-import torch
 
 import asyncio
+import json
 import logging
-from pathlib import Path
 import tempfile
+from pathlib import Path
+from typing import Any
 
 from omegaconf import OmegaConf
 
-from chimera_agent_baseline.rag import start_embedding_service
-from chimera_agent_baseline.run import run_agent
-from chimera_agent_baseline.utils import setup_logging
-
-
+from src.chimera_agent_baseline.rag import start_embedding_service
+from src.chimera_agent_baseline.run import run_agent
+from src.chimera_agent_baseline.utils import setup_logging
 
 log = logging.getLogger(__name__)
+
+# --- Grand Challenge mount points --------------------------------------------
 INPUT_PATH = Path("/input")
 OUTPUT_PATH = Path("/output")
-#RESOURCE_PATH = Path("resources")
-
 CONFIG_PATH = Path("/opt/app/configs/config.yaml")
 RESOURCE_PATH = Path("/opt/app/resources")
+MODEL_PATH = Path("/opt/ml/model")
 
-MODEL_PATH = Path("/opt/ml/model/gemma-4-E2B-it")
-EMBEDDING_MODEL_PATH = Path("/opt/ml/model/embedding_model")
+# Synthetic case id — GC runs one anonymous case per container invocation.
+CASE_ID = "gc-case"
 
-RUN_CHIMERA_BASELINE = True
+# --- Interface (socket) contract ---------------------------------------------
+# Fixed socket slugs shared by every interface.
+STRUCTURED_PROMPT_SLUG = "structured-prompt"
+NEURAL_REP_SLUG = "prostate-modality-level-neural-representations"
 
-def run():
-    # The key is a tuple of the slugs of the input sockets
-    interface_key = get_interface_key()
+# The clinical-data socket slug is what distinguishes the three interfaces /
+# tasks. NB: GC truncates slugs to 50 chars, so the task-3 slug is the clipped
+# ``...-follow-up-clin`` (the on-disk filename is resolved separately via each
+# socket's ``relative_path`` in inputs.json).
+CLINICAL_SLUG_TO_TASK: dict[str, int] = {
+    "prostate-biopsy-decision-clinical-data": 1,
+    "prostate-treatment-decision-clinical-data": 2,
+    "prostate-time-to-recurrence-or-last-follow-up-clin": 3,
+}
 
-    # Lookup the handler for this particular set of sockets (i.e. the interface)
-    handler = {
-        (
-            "prostate-biopsy-decision-clinical-data",
-            "prostate-modality-level-neural-representations",
-            "structured-prompt",
-        ): interf0_handler,
-        (
-            "prostate-modality-level-neural-representations",
-            "prostate-treatment-decision-clinical-data",
-            "structured-prompt",
-        ): interf1_handler,
-        (
-            "prostate-modality-level-neural-representations",
-            "prostate-time-to-recurrence-or-last-follow-up-clin",
-            "structured-prompt",
-        ): interf2_handler,
-    }[interface_key]
-
-    # Call the handler
-    return handler()
+# Result-socket filenames per task (written flat to ``/output``): the decision
+# value and the reasoning value. Slugs carry the challenge's ``biospy`` spelling.
+OUTPUT_SOCKETS: dict[int, dict[str, str]] = {
+    1: {
+        "decision": "prostate-biospy-decision.json",
+        "reasoning": "prostate-biospy-decision-reasoning.json",
+    },
+    2: {
+        "decision": "prostate-treatment-decision.json",
+        "reasoning": "prostate-treatment-decision-reasoning.json",
+    },
+    3: {
+        "decision": "prostate-time-to-recurrence-or-last-follow-up.json",
+        "reasoning": "prostate-time-to-recurrence-or-last-follow-up-reasoning.json",
+    },
+}
 
 
-def interf0_handler():
-    # Read the input
+# ---------------------------------------------------------------------------
+# Input side: GC sockets -> per-case agent-input tree
+# ---------------------------------------------------------------------------
 
-    input_structured_prompt = load_json_file(
-        location=INPUT_PATH / "structured-prompt.json",
+
+def _load_json(path: Path) -> Any:
+    with path.open() as f:
+        return json.load(f)
+
+
+def _write_json(path: Path, content: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as f:
+        json.dump(content, f, indent=2)
+
+
+def _socket_paths() -> dict[str, Path]:
+    """Map each input socket slug to its file under ``/input`` via inputs.json."""
+    inputs = _load_json(INPUT_PATH / "inputs.json")
+    return {sv["socket"]["slug"]: INPUT_PATH / sv["socket"]["relative_path"] for sv in inputs}
+
+
+def _detect_task(slug_to_path: dict[str, Path]) -> int:
+    for slug, task in CLINICAL_SLUG_TO_TASK.items():
+        if slug in slug_to_path:
+            return task
+    raise ValueError(
+        f"No known clinical-data socket in inputs.json (got {sorted(slug_to_path)}); "
+        f"expected one of {sorted(CLINICAL_SLUG_TO_TASK)}"
     )
 
-    input_prostate_modality_level_neural_representations = load_json_file(
-        location=INPUT_PATH / "prostate-modality-level-neural-representations.json",
-    )
 
-    input_prostate_biopsy_decision_clinical_data = load_json_file(
-        location=INPUT_PATH / "prostate-biopsy-decision-clinical-data.json",
-    )
-    # Run the real CHIMERA baseline. If set to False, the original GC dummy
-    # example below can still be used as a minimal reference implementation.
-    if RUN_CHIMERA_BASELINE:
-        return run_baseline_for_gc_interface(
-            task=1,
-            structured_prompt=input_structured_prompt,
-            clinical_data=input_prostate_biopsy_decision_clinical_data,
-            neural_representations=input_prostate_modality_level_neural_representations,
-        )
-    
-    # Process the inputs: any way you'd like, here we show-case torch
-    _show_torch_cuda_info()
+def _materialise_case(task: int, slug_to_path: dict[str, Path], root: Path, case_id: str) -> None:
+    """Write the ``task<N>/agent_input/<case>/`` tree the package expects."""
+    case_dir = root / f"task{task}" / "agent_input" / case_id
+    case_dir.mkdir(parents=True, exist_ok=True)
 
-    # Example how to set torch to use the GPU (if available)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    # structured-prompt -> prompt.json. The package renders this through the
+    # Jinja template; it must carry case_id + task (the Jinja ``show`` macro
+    # tolerates any other missing field, rendering it as an em dash).
+    prompt: dict[str, Any] = {}
+    if STRUCTURED_PROMPT_SLUG in slug_to_path:
+        loaded = _load_json(slug_to_path[STRUCTURED_PROMPT_SLUG])
+        if isinstance(loaded, dict):
+            prompt = dict(loaded)
+    prompt["case_id"] = case_id
+    prompt["task"] = task
+    _write_json(case_dir / "prompt.json", prompt)
 
-    
-    model = torch.nn.Linear(10, 1).to(device)
-    input = torch.randn(1, 10).to(device)
-    output = model(input)
+    # clinical-data -> clinical.json (served behind MCP tools). Field names in
+    # the GC socket already match the ToolSpec field names, so pass it through.
+    clinical_slug = next(s for s in CLINICAL_SLUG_TO_TASK if s in slug_to_path)
+    clinical = _load_json(slug_to_path[clinical_slug])
+    if isinstance(clinical, dict):
+        clinical.setdefault("case_id", case_id)
+    _write_json(case_dir / "clinical.json", clinical)
 
-    # Your model will be extracted to the `model_dir` at runtime on Grand Challenge
-    # Note: when testing locally, the local `./model` directory is mounted here.
-    # Eventually, you should upload it as a tarball to Grand Challenge!
-    # Go to Algorithm and upload it under Models.
-    model_dir = Path("/opt/ml/model")
-    with open(
-        model_dir / "a_tarball_subdirectory" / "some_tarball_resource.txt", "r"
-    ) as f:
-        print(f.read())
+    # neural representations -> features.json (only consumed when the optional
+    # image predictor is enabled; inert otherwise).
+    if NEURAL_REP_SLUG in slug_to_path:
+        features = _load_json(slug_to_path[NEURAL_REP_SLUG])
+        if isinstance(features, dict):
+            features.setdefault("case_id", case_id)
+        _write_json(case_dir / "features.json", features)
 
-    # For now, let us make bogus predictions
 
-    output_prostate_biospy_decision = "yes"
+# ---------------------------------------------------------------------------
+# Output side: prediction records -> per-case result files + predictions.json
+# ---------------------------------------------------------------------------
 
-    output_prostate_biospy_decision_reasoning = {
-        "free_text": "The decision is driven by three critical factors: the PI-RADS 5 score, the extremely high csPCa predicted probability (0.96), and the frankly elevated PSA level (187.0 ng/mL) with a rapid upward trend.",
-        "confidence": "clear",
-        "variable_weights": {
-            "bx": "decisive",
-            "fh": "noted",
-            "age": "important",
-            "dre": "noted",
-            "psa": "noted",
-            "vol": "noted",
-            "psad": "not_used",
-            "cspca": "not_used",
-            "pirads": "important",
-            "comorbidity": "noted",
-        },
+
+def _decision_value(task: int, prediction: dict[str, Any]) -> Any:
+    """The ``decision`` result-socket value for a case (task-specific shape)."""
+    if task == 1:
+        return prediction["biopsy_decision"]  # "yes" / "no"
+    if task == 2:
+        return prediction["treatment_recommendation"]["primary"]  # action token
+    return {
+        "event": int(prediction["event"]),
+        "months_to_recurrence": float(prediction["months_to_recurrence"]),
     }
 
-    # Save your output
 
-    write_json_file(
-        location=OUTPUT_PATH / "prostate-biospy-decision.json",
-        content=output_prostate_biospy_decision,
-    )
+def _reasoning_value(task: int, prediction: dict[str, Any]) -> Any:
+    """The ``reasoning`` result-socket value for a case.
 
-    write_json_file(
-        location=OUTPUT_PATH / "prostate-biospy-decision-reasoning.json",
-        content=output_prostate_biospy_decision_reasoning,
-    )
-
-    return 0
-
-
-def interf1_handler():
-    # Read the input
-
-    input_structured_prompt = load_json_file(
-        location=INPUT_PATH / "structured-prompt.json",
-    )
-
-    input_prostate_modality_level_neural_representations = load_json_file(
-        location=INPUT_PATH / "prostate-modality-level-neural-representations.json",
-    )
-
-    input_prostate_treatment_decision_clinical_data = load_json_file(
-        location=INPUT_PATH / "prostate-treatment-decision-clinical-data.json",
-    )
-    # Run the real CHIMERA baseline. If set to False, the original GC dummy
-    # example below can still be used as a minimal reference implementation.
-    if RUN_CHIMERA_BASELINE:
-        return run_baseline_for_gc_interface(
-            task=2,
-            structured_prompt=input_structured_prompt,
-            clinical_data=input_prostate_treatment_decision_clinical_data,
-            neural_representations=input_prostate_modality_level_neural_representations,
-        )
-    
-    # Process the inputs: any way you'd like, here we show-case torch
-    _show_torch_cuda_info()
-
-    # Example how to set torch to use the GPU (if available)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    model = torch.nn.Linear(10, 1).to(device)
-    input = torch.randn(1, 10).to(device)
-    output = model(input)
-
-    # Your model will be extracted to the `model_dir` at runtime on Grand Challenge
-    # Note: when testing locally, the local `./model` directory is mounted here.
-    # Eventually, you should upload it as a tarball to Grand Challenge!
-    # Go to Algorithm and upload it under Models.
-    model_dir = Path("/opt/ml/model")
-    with open(
-        model_dir / "a_tarball_subdirectory" / "some_tarball_resource.txt", "r"
-    ) as f:
-        print(f.read())
-
-    # For now, let us make bogus predictions
-
-    output_prostate_treatment_decision = "watchful_waiting"
-
-    output_prostate_treatment_decision_reasoning = {
-        "free_text": "The decision to proceed to active treatment is driven primarily by the confluence of high-grade pathology (Gleason 4+4 with PNI), high-risk imaging findings (PI-RADS 5 with seminal vesicle invasion), and aggressive biochemical progression indicated by the rapid PSA escalation.",
-        "confidence": "clear",
-        "variable_weights": {
-            "ct": "important",
-            "fh": "noted",
-            "age": "important",
-            "psa": "important",
-            "psad": "noted",
-            "cspca": "noted",
-            "pirads": "decisive",
-            "bx_isup": "decisive",
-            "bx_gl_sec": "noted",
-            "bx_gl_prim": "noted",
-            "comorbidity": "noted",
-        },
+    Tasks 1 & 2 emit an object carrying the free-text rationale, the overall
+    ``confidence``, the per-variable ``variable_weights``, and the tool
+    ``reveal_sequence``. Task 3 emits the free-text rationale on its own (its
+    reveal sequence is not evaluated).
+    """
+    if task == 3:
+        return prediction["free_text"]
+    return {
+        "free_text": prediction["free_text"],
+        "confidence": prediction["confidence"],
+        "variable_weights": prediction["variable_weights"],
+        "reveal_sequence": prediction.get("reveal_sequence", []),
     }
 
-    # Save your output
 
-    write_json_file(
-        location=OUTPUT_PATH / "prostate-treatment-decision.json",
-        content=output_prostate_treatment_decision,
-    )
-
-    write_json_file(
-        location=OUTPUT_PATH / "prostate-treatment-decision-reasoning.json",
-        content=output_prostate_treatment_decision_reasoning,
-    )
-
-    return 0
+# ---------------------------------------------------------------------------
+# Config + orchestration
+# ---------------------------------------------------------------------------
 
 
-def interf2_handler():
-    # Read the input
-
-    input_structured_prompt = load_json_file(
-        location=INPUT_PATH / "structured-prompt.json",
-    )
-
-    input_prostate_modality_level_neural_representations = load_json_file(
-        location=INPUT_PATH / "prostate-modality-level-neural-representations.json",
-    )
-
-    input_prostate_time_to_recurrence_or_last_follow_up_clin = load_json_file(
-        location=INPUT_PATH
-        / "prostate-time-to-recurrence-or-last-follow-up-clinical-data.json",
-    )
-
-    # Run the real CHIMERA baseline. If set to False, the original GC dummy
-    # example below can still be used as a minimal reference implementation.
-    if RUN_CHIMERA_BASELINE:
-        return run_baseline_for_gc_interface(
-            task=3,
-            structured_prompt=input_structured_prompt,
-            clinical_data=input_prostate_time_to_recurrence_or_last_follow_up_clin,
-            neural_representations=input_prostate_modality_level_neural_representations,
-        )
-
-    # Process the inputs: any way you'd like, here we show-case torch
-    _show_torch_cuda_info()
-
-    # Example how to set torch to use the GPU (if available)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    model = torch.nn.Linear(10, 1).to(device)
-    input = torch.randn(1, 10).to(device)
-    output = model(input)
-
-    # Your model will be extracted to the `model_dir` at runtime on Grand Challenge
-    # Note: when testing locally, the local `./model` directory is mounted here.
-    # Eventually, you should upload it as a tarball to Grand Challenge!
-    # Go to Algorithm and upload it under Models.
-    model_dir = Path("/opt/ml/model")
-    with open(
-        model_dir / "a_tarball_subdirectory" / "some_tarball_resource.txt", "r"
-    ) as f:
-        print(f.read())
-
-    # For now, let us make bogus predictions
-
-    output_prostate_time_to_recurrence_or_last_follow_up_reas = "High-risk pathology (lymph node metastasis, pT4b), positive surgical margins, and seminal vesicle invasion drive the prediction. These aggressive features significantly elevate the immediate risk of biochemical recurrence post-radical prostatectomy."
-
-    output_prostate_time_to_recurrence_or_last_follow_up = {
-        "event": 0,
-        "months_to_recurrence": 31.4,
-    }
-
-    # Save your output
-
-    write_json_file(
-        location=OUTPUT_PATH
-        / "prostate-time-to-recurrence-or-last-follow-up-reasoning.json",
-        content=output_prostate_time_to_recurrence_or_last_follow_up_reas,
-    )
-
-    write_json_file(
-        location=OUTPUT_PATH / "prostate-time-to-recurrence-or-last-follow-up.json",
-        content=output_prostate_time_to_recurrence_or_last_follow_up,
-    )
-
-    return 0
-
-
-def get_interface_key():
-    # The inputs.json is a system generated file that contains information about
-    # the inputs that interface with the algorithm
-    inputs = load_json_file(
-        location=INPUT_PATH / "inputs.json",
-    )
-    socket_slugs = [sv["socket"]["slug"] for sv in inputs]
-    return tuple(sorted(socket_slugs))
-
-
-def load_json_file(*, location):
-    # Reads a json file
-    with open(location) as f:
-        return json.loads(f.read())
-
-
-def write_json_file(*, location, content):
-    # Writes a json file
-    with open(location, "w") as f:
-        f.write(json.dumps(content, indent=4))
-
-
-def _show_torch_cuda_info():
-    print("=+=" * 10)
-    print("Collecting Torch CUDA information")
-    print(f"Torch CUDA is available: {(available := torch.cuda.is_available())}")
-    if available:
-        print(f"\tnumber of devices: {torch.cuda.device_count()}")
-        print(f"\tcurrent device: { (current_device := torch.cuda.current_device())}")
-        print(f"\tproperties: {torch.cuda.get_device_properties(current_device)}")
-    print("=+=" * 10)
-
-
-def load_config(internal_input_root: Path, internal_output_root: Path, task: int):
-    """Load config and override paths for one GC interface run."""
+def _load_config(data_root: Path, output_dir: Path, task: int):
+    """Load the canonical config and override paths/scope for this GC run."""
     cfg = OmegaConf.load(CONFIG_PATH)
-
-    OmegaConf.update(cfg, "paths.data_root", str(internal_input_root))
-    OmegaConf.update(cfg, "paths.output_dir", str(internal_output_root))
+    OmegaConf.update(cfg, "paths.data_root", str(data_root))
+    OmegaConf.update(cfg, "paths.output_dir", str(output_dir))
     OmegaConf.update(cfg, "paths.resource_dir", str(RESOURCE_PATH))
     OmegaConf.update(cfg, "paths.model_dir", str(MODEL_PATH))
-    OmegaConf.update(cfg, "paths.embedding_model_dir", str(EMBEDDING_MODEL_PATH))
-
     OmegaConf.update(cfg, "agent.tasks", [task])
-    OmegaConf.update(cfg, "agent.pids", None)
-    OmegaConf.update(cfg, "agent.limit", None)
-    OmegaConf.update(cfg, "agent.step_timeout", 900)
-
     return cfg
 
 
-
-def run_baseline_for_gc_interface(
-    *,
-    task: int,
-    structured_prompt: dict,
-    clinical_data: dict,
-    neural_representations: dict,
-) -> int:
-    """Run the baseline from flat GC /input files and write flat /output files."""
-
+def run() -> int:
     setup_logging("INFO")
 
-    case_id = structured_prompt.get("case_id", "gc-case")
-
-    clinical_filename_by_task = {
-        1: "prostate-biopsy-decision-clinical-data.json",
-        2: "prostate-treatment-decision-clinical-data.json",
-        3: "prostate-time-to-recurrence-or-last-follow-up-clinical-data.json",
-    }
-    clinical_filename = clinical_filename_by_task[task]
-    structured_prompt = dict(structured_prompt)
-    clinical_data = dict(clinical_data)
-    neural_representations = dict(neural_representations)
-
-    structured_prompt.setdefault("case_id", case_id)
-    structured_prompt.setdefault("task", task)
-    clinical_data.setdefault("case_id", case_id)
-    neural_representations.setdefault("case_id", case_id)
+    slug_to_path = _socket_paths()
+    task = _detect_task(slug_to_path)
+    log.info("Detected interface for task %d", task)
 
     with tempfile.TemporaryDirectory(prefix="chimera-gc-") as tmp:
         tmp_root = Path(tmp)
+        data_root = tmp_root / "input"
+        output_dir = tmp_root / "output"
+        _materialise_case(task, slug_to_path, data_root, CASE_ID)
 
-        internal_input_root = tmp_root / "input"
-        internal_output_root = tmp_root / "output"
+        cfg = _load_config(data_root, output_dir, task)
+        log.info("Starting agent inference (model=%s, task=%d)", cfg.model.model_id, task)
 
-        case_dir = internal_input_root / f"task{task}" / "agent_input" / case_id
-        case_dir.mkdir(parents=True, exist_ok=True)
-
-        write_json_file(
-            location=case_dir / "structured-prompt.json",
-            content=structured_prompt,
-        )
-        write_json_file(
-            location=case_dir / clinical_filename,
-            content=clinical_data,
-        )
-        write_json_file(
-            location=case_dir / "prostate-modality-level-neural-representations.json",
-            content=neural_representations,
-        )
-
-        cfg = load_config(
-            internal_input_root=internal_input_root,
-            internal_output_root=internal_output_root,
-            task=task,
-        )
-
-        log.info("Running CHIMERA baseline for task=%s case_id=%s", task, case_id)
-
-        embed_svc = start_embedding_service(cfg.paths.embedding_model_dir)
+        embed_svc = start_embedding_service(cfg.paths.resource_dir)
         try:
             asyncio.run(run_agent(cfg))
         finally:
             if embed_svc:
                 embed_svc.stop()
 
-        produced_dir = internal_output_root / f"task{task}" / case_id
-        if not produced_dir.is_dir():
-            raise FileNotFoundError(f"No output produced at {produced_dir}")
+        prediction = _load_json(output_dir / f"task{task}" / CASE_ID / "prediction.json")
 
-        for json_file in produced_dir.glob("*.json"):
-            content = load_json_file(location=json_file)
-            write_json_file(
-                location=OUTPUT_PATH / json_file.name,
-                content=content,
-            )
+    # Write the GC result sockets flat to /output, in the task-specific shapes.
+    # The reasoning socket carries the tool ``reveal_sequence`` so nothing is
+    # lost even though only the two declared sockets are written.
+    sockets = OUTPUT_SOCKETS[task]
+    _write_json(OUTPUT_PATH / sockets["decision"], _decision_value(task, prediction))
+    _write_json(OUTPUT_PATH / sockets["reasoning"], _reasoning_value(task, prediction))
 
+    log.info("Wrote GC result sockets for task %d to %s", task, OUTPUT_PATH)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(run())
-
-
-
-
-
-
