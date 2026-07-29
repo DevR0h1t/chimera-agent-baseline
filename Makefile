@@ -82,7 +82,7 @@ lock: gc-build ## Regenerate requirements.lock (project deps resolved on top of 
 # =============================================================================
 
 gc-build: ## Build the GC Docker image
-	docker build --platform=linux/amd64 --tag $(GC_IMAGE_TAG) .
+	docker build --platform=linux/amd64 --tag $(GC_IMAGE_TAG) --file Dockerfile_Baseline .
 
 INPUT ?= data
 

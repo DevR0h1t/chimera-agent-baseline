@@ -183,7 +183,7 @@ async def run_agent(cfg: DictConfig) -> None:
 def main(cfg: DictConfig) -> None:
     setup_logging(cfg.logging.level)
 
-    embed_svc = start_embedding_service(cfg.paths.resource_dir)
+    embed_svc = start_embedding_service(Path(cfg.paths.resource_dir) / "embedding_model")
     try:
         asyncio.run(run_agent(cfg))
     finally:

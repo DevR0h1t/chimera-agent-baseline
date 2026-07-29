@@ -37,9 +37,9 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
-from src.chimera_agent_baseline.rag import start_embedding_service
-from src.chimera_agent_baseline.run import run_agent
-from src.chimera_agent_baseline.utils import setup_logging
+from chimera_agent_baseline.rag import start_embedding_service
+from chimera_agent_baseline.run import run_agent
+from chimera_agent_baseline.utils import setup_logging
 
 log = logging.getLogger(__name__)
 
@@ -203,6 +203,22 @@ def _load_config(data_root: Path, output_dir: Path, task: int):
     return cfg
 
 
+def _resolve_embedding_model_dir() -> Path:
+    """Locate the RAG embedding model.
+
+    Two supported locations, since the model may either ship in the uploaded
+    model tarball or be baked into the image under ``resources/``:
+      * ``/opt/ml/model/embedding_model``      (model tarball)
+      * ``/opt/app/resources/embedding_model`` (baked into the image)
+    Falls back to the tarball path when neither exists, so the caller logs one
+    clear "not found" message and degrades gracefully instead of crashing.
+    """
+    for candidate in (MODEL_PATH / "embedding_model", RESOURCE_PATH / "embedding_model"):
+        if candidate.exists():
+            return candidate
+    return MODEL_PATH / "embedding_model"
+
+
 def run() -> int:
     setup_logging("INFO")
 
@@ -219,7 +235,7 @@ def run() -> int:
         cfg = _load_config(data_root, output_dir, task)
         log.info("Starting agent inference (model=%s, task=%d)", cfg.model.model_id, task)
 
-        embed_svc = start_embedding_service(cfg.paths.resource_dir)
+        embed_svc = start_embedding_service(_resolve_embedding_model_dir())
         try:
             asyncio.run(run_agent(cfg))
         finally:

@@ -4,12 +4,12 @@
 set -e
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-DOCKER_IMAGE_TAG="example_algorithm_debug"
+DOCKER_IMAGE_TAG="chimera_agent_baseline_debug"
 
 DOCKER_NOOP_VOLUME="${DOCKER_IMAGE_TAG}-volume"
 
 INPUT_DIR="${SCRIPT_DIR}/test/input"
-OUTPUT_DIR="${SCRIPT_DIR}/test/outputs"
+OUTPUT_DIR="${SCRIPT_DIR}/test/output"
 
 echo "=+= (Re)build the container"
 source "${SCRIPT_DIR}/do_build.sh"
@@ -38,7 +38,14 @@ chmod -R -f o+rX "$INPUT_DIR" "${SCRIPT_DIR}/model" || true
 # Each case is a directory holding an inputs.json (e.g. interf0/case1). Grand
 # Challenge runs one job per case, so we mirror that: one container run per
 # case, each seeing a flat /input and writing its result sockets to /output.
-mapfile -t CASE_DIRS < <(cd "$INPUT_DIR" && find . -name inputs.json -printf '%h\n' | sed 's|^\./||' | sort)
+# NB: kept portable — no `mapfile` (bash 4+) and no `find -printf` (GNU-only),
+# so this also works on macOS / BSD userlands.
+CASE_DIRS=()
+while IFS= read -r inputs_file; do
+  rel="${inputs_file#./}"
+  CASE_DIRS+=("$(dirname "$rel")")
+done < <(cd "$INPUT_DIR" && find . -name inputs.json | sort)
+
 if [ "${#CASE_DIRS[@]}" -eq 0 ]; then
   echo "=+= No cases (inputs.json) found under ${INPUT_DIR}" >&2
   exit 1
