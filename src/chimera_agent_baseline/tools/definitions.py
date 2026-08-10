@@ -101,15 +101,13 @@ FAMILY_HISTORY = ToolSpec(
 )
 
 
-# Tasks 1 & 2 expose the same masked Extended EHR view, so they share the
-# same tool set. (Task 1's clinical.json has no pathology_report, so
-# get_pathology_report returns a "no data" note there — mirroring the
-# form's masked-but-empty pathology section.)
+# Tasks 1 and 2 expose the same masked Extended EHR sections, except that
+# Task 1 does not expose the pathology report.
+
 TASK1_TOOLS: list[ToolSpec] = [
     PSA_TREND,
     LAB_RESULTS,
     MRI_REPORT,
-    PATHOLOGY_REPORT,
     PREVIOUS_NOTES,
     FAMILY_HISTORY,
 ]

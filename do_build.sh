@@ -10,6 +10,5 @@ DOCKER_IMAGE_TAG="chimera_agent_baseline_debug"
 docker build \
   --platform=linux/amd64 \
   --tag "$DOCKER_IMAGE_TAG"  \
-  --file "${SCRIPT_DIR}/Dockerfile_Baseline" \
   ${DOCKER_QUIET_BUILD:+--quiet} \
   "$SCRIPT_DIR" 2>&1

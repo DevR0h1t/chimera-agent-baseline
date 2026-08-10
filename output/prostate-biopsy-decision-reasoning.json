@@ -1,0 +1,21 @@
+{
+    "confidence": "clear",
+    "variable_weights": {
+        "bx": "not_used",
+        "age": "not_used",
+        "dre": "not_used",
+        "psa": "decisive",
+        "vol": "noted",
+        "psad": "important",
+        "cspca": "important",
+        "pirads": "decisive",
+        "comorbidity": "not_used",
+        "fh": "not_used"
+    },
+    "reveal_sequence": [
+        "radiology_report",
+        "previous_notes",
+        "psa_trend"
+    ],
+    "free_text": "The decision is driven by the combination of a PI-RADS 4 lesion, an elevated and rising PSA with a concerning velocity, and the patient's prior history of prostate cancer, all pointing towards a need for tissue confirmation."
+}

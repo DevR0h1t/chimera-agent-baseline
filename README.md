@@ -163,7 +163,7 @@ is a single-element list — so loading is uniform:
 | `Biopsy slide` | one to three feature vectors | 2, 3 |
 | `Prostatectomy slide` | one to three feature vectors | 3 |
 
-The vectors are raw foundation-model output (e.g. 960-d) and are **not**
+The vectors are raw foundation-model output (MRI: 1024-d; biopsy and prostatectomy slides: 960-d) and are **not**
 meant to enter the LLM context directly — build a predictor or tool on top
 and feed the agent a compact score/label. The **baseline does not consume
 features**; a decoupled loader is provided for participants who want to:
@@ -186,6 +186,7 @@ The structured submission contract is the Pydantic models in
 `Task2Output`, `Task3Output`). Each case produces two task-specific JSON output files;
 outputs that don't validate are rejected. Enum tokens are lowercase, to
 match the urologist forms.
+For Tasks 1 and 2, `reveal_sequence` records which clinical-data sections/tools were accessed during the decision; the order of entries has no importance.
 
 #### Task 1: Biopsy decision
 
@@ -203,7 +204,6 @@ Each Task 1 case produces two JSON files under
 
 {
   "confidence": "clear", // clear | borderline | uncertain
-
   "variable_weights": {
     "age": "important",       // not_used | noted | important | decisive
     "fh": "noted",            // not_used | noted | important | decisive
@@ -216,7 +216,13 @@ Each Task 1 case produces two JSON files under
     "dre": "noted",           // not_used | noted | important | decisive
     "bx": "decisive"          // not_used | noted | important | decisive
   },
-
+  "reveal_sequence": [
+    "family_history",
+    "previous_notes",
+    "laboratory_results",
+    "psa_trend",
+    "radiology_report"
+  ],
   "free_text": "The decision is driven by three critical factors: the PI-RADS 5 score, the extremely high csPCa predicted probability (0.96), and the frankly elevated PSA level (187.0 ng/mL) with a rapid upward trend." // free-text explanation of the main factors driving the decision
 }
 ```
@@ -237,7 +243,6 @@ Each Task 2 case produces two JSON files under
 
 {
   "confidence": "clear", // clear | borderline | uncertain
-
   "variable_weights": {
     "bx_gl_prim": "important",  // not_used | noted | important | decisive
     "pirads": "decisive",       // not_used | noted | important | decisive
@@ -251,7 +256,14 @@ Each Task 2 case produces two JSON files under
     "psad": "important",        // not_used | noted | important | decisive
     "cspca": "not_used"         // not_used | noted | important | decisive
   },
-
+  "reveal_sequence": [
+    "family_history",
+    "previous_notes",
+    "laboratory_results",
+    "psa_trend",
+    "radiology_report",
+    "pathology_report"
+  ],
   "free_text": "Patient with GG 1 on active surveillance, negative follow-up imaging." // free-text explanation of the main factors driving the treatment decision
 }
 ```

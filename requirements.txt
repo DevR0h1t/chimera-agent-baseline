@@ -29,6 +29,8 @@ kubernetes==36.0.2
 langchain==1.3.11
 langchain-core==1.4.8
 langchain-mcp-adapters==0.2.2
+#new line added to resolve dependency conflict
+mcp==1.29.0
 langchain-openai==1.3.3
 langchain-protocol==0.0.18
 langgraph==1.2.6
