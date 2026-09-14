@@ -22,7 +22,7 @@ paths:
   output_dir: test/output
   resource_dir: resources
   model_dir: model
-  embedding_model_dir: model/embedding_model
+  embedding_model_dir: resources/embedding_model
 
 # --- Model ---
 # provider=vllm   -- in-process inference via vLLM (the GC container path).
@@ -60,7 +60,7 @@ agent:
   # and returns a compact score — never the raw vectors. Replace `run_predictor`
   # in tools/predictor.py with your trained head (use one origin or fuse them).
   predictor:
-    enabled: false
+    enabled: true
 
 # --- Logging ---
 logging:
